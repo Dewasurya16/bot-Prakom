@@ -246,11 +246,11 @@ async def on_member_join(member):
         print(f"Gagal mengirim DM sambutan ke {member}.")
 
     # Kirim pesan sambutan ke channel 'Selamat Datang'
-   welcome_channel = guild.get_channel(WELCOME_CHANNEL_ID) 
-if welcome_channel:
-    embed = discord.Embed(
-        title=f"🎉 Welcome, {member.display_name} ke {guild.name}! 🎉",
-        description=(
+   welcome_channel = guild.get_channel(WELCOME_CHANNEL_ID)
+    if welcome_channel:
+        embed = discord.Embed(
+            title=f"🎉 Welcome, {member.display_name} ke {guild.name}! 🎉",
+            description=(
             f"Asik, kamu udah resmi jadi bagian dari komunitas Prakom! 😎\n\n"
             f"Biar makin *smooth* di sini, ada 1 *step* terakhir nih:\n"
             f"**1.** 📖 **Cek Aturan Main:** Jangan lupa baca dan pahami <#{ANNOUNCEMENT_CHANNEL_ID}> ya, demi kenyamanan bareng.\n\n"
