@@ -3,7 +3,7 @@ import discord
 from discord.ext import commands, tasks
 import asyncio
 from collections import defaultdict
-from datetime import datetime, timezone
+from datetime import datetime, timezone, time
 import random
 
 from discord import app_commands
@@ -44,7 +44,7 @@ daily_reminder_users = set()
 weekly_reminders = defaultdict(list)    # {user_id: [(weekday, time, message), ...]}
 one_time_reminders = defaultdict(list)  # {user_id: [(datetime, message), ...]}
 public_reminders = defaultdict(list)    # {channel_id: [(time, message), ...]}
-inactive_tickets = {} 
+inactive_tickets = {}
 
 # Tempat menyimpan semua reminder ke role
 role_reminders = []  # List berisi dict reminder ke role
@@ -133,6 +133,7 @@ async def on_ready():
     one_time_reminder_task.start()
     public_reminder_task.start()
     close_inactive_tickets.start()
+    check_role_reminders.start()
 
 
 @bot.event
@@ -266,12 +267,12 @@ async def on_reaction_add(reaction, user):
 
 
 # ======= COMMANDS =======
-@tree.command(name="set_reminder", description="Set reminder ke role: sekali, harian, atau mingguan", guild=discord.Object(id=GUILD_ID))
+@tree.command(name="set_reminder", description="Set reminder: sekali, harian, mingguan, publik, atau ke role", guild=discord.Object(id=GUILD_ID))
 @app_commands.describe(
-    tipe="Tipe reminder: sekali, harian, mingguan",
-    waktu="Waktu pengingat. Format HH:MM untuk harian/mingguan, ISO datetime untuk sekali",
+    tipe="Tipe reminder: sekali, harian, mingguan, publik, role",
+    waktu="Waktu pengingat. Format HH:MM untuk harian/mingguan/publik, ISO datetime untuk sekali",
     pesan="Pesan reminder yang akan dikirim",
-    role="Role yang akan di-mention",
+    role="Role yang akan di-mention (hanya untuk tipe 'role')",
     hari="Untuk tipe mingguan: 0=Senin ... 6=Minggu"
 )
 async def set_reminder(
@@ -279,48 +280,82 @@ async def set_reminder(
     tipe: str,
     waktu: str,
     pesan: str,
-    role: discord.Role,
+    role: discord.Role = None, # Jadikan opsional
     hari: int = None
 ):
     now = datetime.utcnow().replace(tzinfo=timezone.utc)
-    
-    # Parsing waktu sesuai tipe
-    if tipe == "sekali":
-        try:
-            remind_time = datetime.fromisoformat(waktu)
-            if remind_time.tzinfo is None:
-                remind_time = remind_time.replace(tzinfo=timezone.utc)
-        except Exception:
-            await interaction.response.send_message("Format waktu untuk tipe 'sekali' harus ISO datetime. Contoh: 2025-05-26T15:30:00+00:00", ephemeral=True)
-            return
-        if remind_time <= now:
-            await interaction.response.send_message("Waktu reminder harus di masa depan.", ephemeral=True)
-            return
-    else:
-        # untuk harian dan mingguan, waktu format "HH:MM"
-        try:
-            hour, minute = map(int, waktu.split(":"))
-            remind_time = time(hour=hour, minute=minute)
-        except Exception:
-            await interaction.response.send_message("Format waktu harus HH:MM, contoh: 15:30", ephemeral=True)
+    tipe = tipe.lower()
+    user_id = interaction.user.id
+    guild = interaction.guild
+
+    if tipe == "role":
+        if not role:
+            await interaction.response.send_message("Untuk tipe 'role', kamu harus memilih role yang akan di-mention.", ephemeral=True)
             return
         
-        if tipe == "mingguan":
-            if hari is None or not (0 <= hari <= 6):
-                await interaction.response.send_message("Untuk tipe 'mingguan', parameter hari harus diisi 0-6 (0=Senin, ..., 6=Minggu).", ephemeral=True)
+        try:
+            remind_time_obj = datetime.fromisoformat(waktu)
+            if remind_time_obj.tzinfo is None:
+                remind_time_obj = remind_time_obj.replace(tzinfo=timezone.utc)
+            if remind_time_obj <= now:
+                await interaction.response.send_message("Waktu reminder harus di masa depan.", ephemeral=True)
                 return
-    
-    # Simpan reminder ke list global role_reminders
-    role_reminders.append({
-        "tipe": tipe,
-        "waktu": remind_time,
-        "pesan": pesan,
-        "role": role,
-        "hari": hari,
-        "channel_id": interaction.channel.id,
-    })
-    
-    await interaction.response.send_message(f"Reminder berhasil disimpan! Role {role.mention} akan diingatkan sesuai jadwal.", ephemeral=True)
+            
+            role_reminders.append({
+                "tipe": tipe,
+                "waktu": remind_time_obj,
+                "pesan": pesan,
+                "role": role,
+                "hari": None, # Tidak relevan untuk tipe 'role' dengan waktu ISO
+                "channel_id": interaction.channel.id,
+            })
+            await interaction.response.send_message(f"Reminder berhasil disimpan! Role {role.mention} akan diingatkan sesuai jadwal.", ephemeral=True)
+        except ValueError:
+            await interaction.response.send_message("Format waktu untuk tipe 'role' harus ISO datetime. Contoh: 2025-05-26T15:30:00+00:00", ephemeral=True)
+            return
+
+    elif tipe == "harian":
+        try:
+            datetime.strptime(waktu, "%H:%M")
+            daily_reminder_users.add(user_id)
+            await interaction.response.send_message(f"Reminder harian set pada jam {waktu}.", ephemeral=True)
+        except ValueError:
+            await interaction.response.send_message("Format waktu harian harus HH:MM (24 jam).", ephemeral=True)
+
+    elif tipe == "mingguan":
+        if hari is None or not (0 <= hari <= 6):
+            await interaction.response.send_message("Untuk reminder mingguan, parameter hari harus antara 0 (Senin) sampai 6 (Minggu).", ephemeral=True)
+            return
+        try:
+            datetime.strptime(waktu, "%H:%M")
+            weekly_reminders[user_id].append((hari, waktu, pesan))
+            await interaction.response.send_message(f"Reminder mingguan set pada hari {hari} jam {waktu}.", ephemeral=True)
+        except ValueError:
+            await interaction.response.send_message("Format waktu mingguan harus HH:MM (24 jam).", ephemeral=True)
+
+    elif tipe == "sekali":
+        try:
+            dt = datetime.fromisoformat(waktu)
+            if dt < datetime.utcnow():
+                await interaction.response.send_message("Waktu reminder harus di masa depan.", ephemeral=True)
+                return
+            one_time_reminders[user_id].append((dt, pesan))
+            await interaction.response.send_message(f"Reminder sekali set untuk {dt.isoformat()}.", ephemeral=True)
+        except ValueError:
+            await interaction.response.send_message("Format waktu sekali harus ISO datetime (contoh: 2025-05-26T14:30:00).", ephemeral=True)
+
+    elif tipe == "publik":
+        channel = interaction.channel
+        try:
+            datetime.strptime(waktu, "%H:%M")
+            public_reminders[channel.id].append((waktu, pesan))
+            await interaction.response.send_message(f"Reminder publik set di channel ini pada jam {waktu}.", ephemeral=True)
+        except ValueError:
+            await interaction.response.send_message("Format waktu publik harus HH:MM (24 jam).", ephemeral=True)
+
+    else:
+        await interaction.response.send_message("Tipe reminder tidak valid. Gunakan 'sekali', 'harian', 'mingguan', 'publik', atau 'role'.", ephemeral=True)
+
 @tree.command(name="userinfo", description="Tampilkan info pengguna", guild=discord.Object(id=GUILD_ID))
 @app_commands.describe(user="User yang ingin dilihat info-nya (opsional)")
 async def userinfo(interaction: discord.Interaction, user: discord.Member = None):
@@ -480,6 +515,29 @@ async def public_reminder_task():
                 except:
                     pass
 
+# ======= ROLE REMINDER TASK =======
+@tasks.loop(minutes=1)
+async def check_role_reminders():
+    await bot.wait_until_ready()
+    now = datetime.utcnow().replace(tzinfo=timezone.utc)
+    to_remove_role_reminders = []
+
+    for reminder in role_reminders:
+        if reminder["tipe"] == "role":
+            remind_time = reminder["waktu"]
+            if remind_time <= now:
+                channel = bot.get_channel(reminder["channel_id"])
+                role = reminder["role"]
+                message = reminder["pesan"]
+                if channel and role:
+                    try:
+                        await channel.send(f"{role.mention} {message}")
+                    except Exception as e:
+                        print(f"Gagal mengirim reminder role: {e}")
+                to_remove_role_reminders.append(reminder)
+    
+    for rem in to_remove_role_reminders:
+        role_reminders.remove(rem)
 
 # ======= CLOSE INACTIVE TICKETS =======#
 @tasks.loop(minutes=30)
@@ -545,64 +603,7 @@ async def poll(
 
     await interaction.response.send_message("Polling berhasil dibuat!", ephemeral=True)
 
-
-
-
-# ======= REMINDER COMMANDS =======
-@tree.command(name="set_reminder", description="Set reminder sekali, harian, atau mingguan", guild=discord.Object(id=GUILD_ID))
-async def set_reminder(
-    interaction: discord.Interaction,
-    tipe: str,  # "sekali", "harian", "mingguan", "publik"
-    waktu: str,  # format "HH:MM" atau ISO datetime untuk sekali
-    pesan: str,
-    hari: int = None  # optional, 0=Senin ... 6=Minggu, untuk mingguan
-):
-    tipe = tipe.lower()
-    user_id = interaction.user.id
-    guild = interaction.guild
-
-    if tipe == "harian":
-        try:
-            datetime.strptime(waktu, "%H:%M")
-            daily_reminder_users.add(user_id)
-            await interaction.response.send_message(f"Reminder harian set pada jam {waktu}.", ephemeral=True)
-        except:
-            await interaction.response.send_message("Format waktu harian harus HH:MM (24 jam).", ephemeral=True)
-
-    elif tipe == "mingguan":
-        if hari is None or hari < 0 or hari > 6:
-            await interaction.response.send_message("Untuk reminder mingguan, parameter hari harus antara 0 (Senin) sampai 6 (Minggu).", ephemeral=True)
-            return
-        try:
-            datetime.strptime(waktu, "%H:%M")
-            weekly_reminders[user_id].append((hari, waktu, pesan))
-            await interaction.response.send_message(f"Reminder mingguan set pada hari {hari} jam {waktu}.", ephemeral=True)
-        except:
-            await interaction.response.send_message("Format waktu mingguan harus HH:MM (24 jam).", ephemeral=True)
-
-    elif tipe == "sekali":
-        try:
-            dt = datetime.fromisoformat(waktu)
-            if dt < datetime.utcnow():
-                await interaction.response.send_message("Waktu reminder harus di masa depan.", ephemeral=True)
-                return
-            one_time_reminders[user_id].append((dt, pesan))
-            await interaction.response.send_message(f"Reminder sekali set untuk {dt.isoformat()}.", ephemeral=True)
-        except:
-            await interaction.response.send_message("Format waktu sekali harus ISO datetime (contoh: 2025-05-26T14:30:00).", ephemeral=True)
-
-    elif tipe == "publik":
-        channel = interaction.channel
-        try:
-            datetime.strptime(waktu, "%H:%M")
-            public_reminders[channel.id].append((waktu, pesan))
-            await interaction.response.send_message(f"Reminder publik set di channel ini pada jam {waktu}.", ephemeral=True)
-        except:
-            await interaction.response.send_message("Format waktu publik harus HH:MM (24 jam).", ephemeral=True)
-
-    else:
-        await interaction.response.send_message("Tipe reminder harus 'sekali', 'harian', 'mingguan', atau 'publik'.", ephemeral=True)
-
+# ======= REMINDER COMMANDS (UPDATED) =======
 
 @tree.command(name="list_reminder", description="Lihat daftar reminder kamu", guild=discord.Object(id=GUILD_ID))
 async def list_reminder(interaction: discord.Interaction):
@@ -628,16 +629,33 @@ async def list_reminder(interaction: discord.Interaction):
     else:
         msg += "- Reminder Sekali: Tidak ada\n"
 
+    # Tambahkan daftar reminder role yang dibuat oleh user ini (jika ada)
+    user_role_reminders = [
+        r for r in role_reminders if r["tipe"] == "role" and r["channel_id"] == interaction.channel.id # Ini perlu diperbaiki jika ingin reminder role khusus pengguna
+    ]
+    if user_role_reminders:
+        msg += "- Reminder Role (di channel ini):\n"
+        for rem in user_role_reminders:
+            msg += f"  Untuk role {rem['role'].name} pada {rem['waktu'].isoformat()}: {rem['pesan']}\n"
+    else:
+        msg += "- Reminder Role: Tidak ada\n"
+
+
     await interaction.response.send_message(msg, ephemeral=True)
 
 
-@tree.command(name="remove_reminder", description="Hapus semua reminder harian kamu", guild=discord.Object(id=GUILD_ID))
+@tree.command(name="remove_reminder", description="Hapus semua reminder pribadi kamu (harian, mingguan, sekali)", guild=discord.Object(id=GUILD_ID))
 async def remove_reminder(interaction: discord.Interaction):
     user_id = interaction.user.id
     daily_reminder_users.discard(user_id)
     weekly_reminders.pop(user_id, None)
     one_time_reminders.pop(user_id, None)
-    await interaction.response.send_message("Semua reminder kamu sudah dihapus.", ephemeral=True)
+    
+    # Perlu cara untuk menghapus reminder role yang spesifik dibuat oleh user ini, 
+    # saat ini `role_reminders` global tidak melacak siapa yang membuatnya.
+    # Jika perlu, Anda harus menambahkan `user_id` ke dictionary `role_reminders` saat membuatnya.
+    
+    await interaction.response.send_message("Semua reminder pribadi kamu sudah dihapus. (Reminder role tidak terpengaruh)", ephemeral=True)
 
 
 # ======= RUN BOT =======
@@ -647,4 +665,3 @@ if __name__ == "__main__":
         print("❌ Environment variable DISCORD_TOKEN tidak ditemukan!")
     else:
         bot.run(TOKEN)
-
