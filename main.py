@@ -13,6 +13,7 @@ from discord.ui import View, Button
 # ======= CONFIGURATION =======
 GUILD_ID = 1375444915403751424
 POST_CHANNEL_ID = 1375939507114741872
+DAILY_ANNOUNCEMENT_CHANNEL_ID = 1375939507114741872
 VERIFICATION_CHANNEL_ID = 1375775766482128906
 GENDER_CHANNEL_ID = 1375768360637436005
 LOG_CHANNEL_ID = 1375886856188727357
@@ -39,8 +40,11 @@ user_messages = defaultdict(list)
 user_xp = defaultdict(int)
 user_level = defaultdict(int)
 personal_reminders = defaultdict(list)  # {user_id: [(remind_time, message), ...]}
-daily_reminder_users = set()  # user_ids yang minta reminder harian
-inactive_tickets = {}  # {channel_id: last_message_time}
+daily_reminder_users = set()
+weekly_reminders = defaultdict(list)    # {user_id: [(weekday, time, message), ...]}
+one_time_reminders = defaultdict(list)  # {user_id: [(datetime, message), ...]}
+public_reminders = defaultdict(list)    # {channel_id: [(time, message), ...]}
+inactive_tickets = {} 
 
 # ======= QUOTES & TEMPLATES =======
 DAILY_QUOTES = [
@@ -71,20 +75,16 @@ DAILY_DM_TEMPLATE = (
     "- Semangat terus dan tetap fokus! 💪"
 )
 
-
 # ======= HELPER FUNCTIONS =======
 def is_admin_prakom():
-
     async def predicate(interaction: discord.Interaction):
-        role = discord.utils.get(interaction.user.roles,
-                                 name=ADMIN_PRAKOM_ROLE)
+        role = discord.utils.get(interaction.user.roles, name=ADMIN_PRAKOM_ROLE)
         if role:
             return True
         await interaction.response.send_message(
             "❌ Kamu tidak punya izin untuk menggunakan command ini.",
             ephemeral=True)
         return False
-
     return app_commands.check(predicate)
 
 
@@ -100,14 +100,12 @@ async def create_ticket_channel(guild, user):
 
     overwrites = {
         guild.default_role: discord.PermissionOverwrite(read_messages=False),
-        user: discord.PermissionOverwrite(read_messages=True,
-                                          send_messages=True),
+        user: discord.PermissionOverwrite(read_messages=True, send_messages=True),
     }
 
     admin_role = discord.utils.get(guild.roles, name=ADMIN_PRAKOM_ROLE)
     if admin_role:
-        overwrites[admin_role] = discord.PermissionOverwrite(
-            read_messages=True, send_messages=True)
+        overwrites[admin_role] = discord.PermissionOverwrite(read_messages=True, send_messages=True)
 
     channel = await guild.create_text_channel(
         f"tiket-{user.name.lower().replace(' ', '-')}",
@@ -127,8 +125,11 @@ async def on_ready():
     except Exception as e:
         print(f"Gagal sync slash commands: {e}")
 
-    # Mulai task pengingat harian
     daily_reminder_task.start()
+    weekly_reminder_task.start()
+    one_time_reminder_task.start()
+    public_reminder_task.start()
+    close_inactive_tickets.start()
 
 
 @bot.event
@@ -156,9 +157,7 @@ async def on_message(message):
     # ANTI-SPAM
     now = datetime.utcnow()
     timestamps = user_messages[message.author.id]
-    timestamps = [
-        ts for ts in timestamps if (now - ts).seconds < SPAM_INTERVAL
-    ]
+    timestamps = [ts for ts in timestamps if (now - ts).seconds < SPAM_INTERVAL]
     timestamps.append(now)
     user_messages[message.author.id] = timestamps
 
@@ -167,8 +166,7 @@ async def on_message(message):
             await message.delete()
             await message.channel.send(
                 f"{message.author.mention} spam terdeteksi.", delete_after=5)
-            mute_role = discord.utils.get(message.guild.roles,
-                                          name=MUTE_ROLE_NAME)
+            mute_role = discord.utils.get(message.guild.roles, name=MUTE_ROLE_NAME)
             if mute_role and mute_role not in message.author.roles:
                 await message.author.add_roles(mute_role)
                 await message.channel.send(
@@ -199,8 +197,7 @@ async def on_message(message):
         try:
             await member.edit(nick=nama_baru)
         except:
-            await message.channel.send("❌ Tidak bisa ganti nickname.",
-                                       delete_after=10)
+            await message.channel.send("❌ Tidak bisa ganti nickname.", delete_after=10)
             return
 
         role_unverified = discord.utils.get(guild.roles, name="Unverified")
@@ -212,8 +209,7 @@ async def on_message(message):
             if role_anggota and role_anggota not in member.roles:
                 await member.add_roles(role_anggota)
         except:
-            await message.channel.send("❌ Tidak bisa mengatur role.",
-                                       delete_after=10)
+            await message.channel.send("❌ Tidak bisa mengatur role.", delete_after=10)
             return
 
         channel_gender = guild.get_channel(GENDER_CHANNEL_ID)
@@ -264,198 +260,176 @@ async def on_reaction_add(reaction, user):
         return
 
     emoji = reaction.emoji
-    try:
-        if emoji == "👩":
+    if emoji == "👩":
+        if role_cantik and role_cantik not in member.roles:
             await member.add_roles(role_cantik)
-            await member.remove_roles(role_anggota)
-            await reaction.message.channel.send(
-                f"{member.mention} kamu sudah terdaftar sebagai Prakom Cantik."
-            )
-        elif emoji == "👨":
+        if role_ganteng and role_ganteng in member.roles:
+            await member.remove_roles(role_ganteng)
+    elif emoji == "👨":
+        if role_ganteng and role_ganteng not in member.roles:
             await member.add_roles(role_ganteng)
-            await member.remove_roles(role_anggota)
-            await reaction.message.channel.send(
-                f"{member.mention} kamu sudah terdaftar sebagai Prakom Ganteng."
-            )
-    except Exception:
-        pass
+        if role_cantik and role_cantik in member.roles:
+            await member.remove_roles(role_cantik)
 
 
 # ======= SLASH COMMANDS =======
-@tree.command(name="clear",
-              description="Hapus sejumlah pesan",
-              guild=discord.Object(id=GUILD_ID))
-@has_role(ADMIN_PRAKOM_ROLE)
-async def clear(interaction: discord.Interaction, jumlah: int):
-    if jumlah < 1:
-        await interaction.response.send_message("Jumlah harus lebih dari 0.",
-                                                ephemeral=True)
-        return
-    deleted = await interaction.channel.purge(limit=jumlah + 1)
-    await interaction.response.send_message(
-        f"🧹 Berhasil menghapus {len(deleted)-1} pesan.", ephemeral=True)
-
-
-@tree.command(name="dailyquote",
-              description="Tampilkan quote motivasi harian (manual)",
-              guild=discord.Object(id=GUILD_ID))
-async def dailyquote(interaction: discord.Interaction):
-    quote = random.choice(DAILY_QUOTES)
-    await interaction.response.send_message(f"💡 Quote hari ini:\n\n{quote}",
-                                            ephemeral=True)
-
-
-@tree.command(name="announce",
-              description="Kirim pengumuman ke channel",
-              guild=discord.Object(id=GUILD_ID))
+@tree.command(name="pengumuman_harian", description="Kirim pengumuman harian di channel tertentu", guild=discord.Object(id=GUILD_ID))
 @is_admin_prakom()
-async def announce(interaction: discord.Interaction, *, message: str):
-    channel = bot.get_channel(ANNOUNCEMENT_CHANNEL_ID)
+async def pengumuman_harian(interaction: discord.Interaction):
+    channel = bot.get_channel(DAILY_ANNOUNCEMENT_CHANNEL_ID)
     if not channel:
-        await interaction.response.send_message(
-            "❌ Channel pengumuman tidak ditemukan.", ephemeral=True)
+        await interaction.response.send_message("Channel pengumuman tidak ditemukan.", ephemeral=True)
         return
-    await channel.send(f"📢 **Pengumuman:** {message}")
-    await interaction.response.send_message("✅ Pengumuman telah dikirim.",
-                                            ephemeral=True)
+
+    quote = random.choice(DAILY_QUOTES)
+    message = f"{DAILY_ANNOUNCEMENT_TEMPLATE}\n\n💡 Quote hari ini:\n*{quote}*"
+    await channel.send(message)
+    await interaction.response.send_message("Pengumuman harian telah dikirim.", ephemeral=True)
 
 
-@tree.command(name="ticket",
-              description="Buka tiket bantuan",
-              guild=discord.Object(id=GUILD_ID))
-async def ticket(interaction: discord.Interaction):
-    guild = interaction.guild
-    channel, error = await create_ticket_channel(guild, interaction.user)
+@tree.command(name="reminder_harian", description="Aktifkan atau nonaktifkan reminder harian lewat DM", guild=discord.Object(id=GUILD_ID))
+async def reminder_harian(interaction: discord.Interaction):
+    user_id = interaction.user.id
+    if user_id in daily_reminder_users:
+        daily_reminder_users.remove(user_id)
+        await interaction.response.send_message("Reminder harian dimatikan.", ephemeral=True)
+    else:
+        daily_reminder_users.add(user_id)
+        await interaction.response.send_message("Reminder harian diaktifkan.", ephemeral=True)
+
+
+@tree.command(name="buat_tiket", description="Buat tiket bantuan baru", guild=discord.Object(id=GUILD_ID))
+async def buat_tiket(interaction: discord.Interaction):
+    channel, error = await create_ticket_channel(interaction.guild, interaction.user)
     if error:
         await interaction.response.send_message(error, ephemeral=True)
+    else:
+        await interaction.response.send_message(f"Tiket dibuat: {channel.mention}", ephemeral=True)
+
+
+@tree.command(name="close_tiket", description="Tutup tiket bantuan ini", guild=discord.Object(id=GUILD_ID))
+async def close_tiket(interaction: discord.Interaction):
+    channel = interaction.channel
+    if channel.name.startswith("tiket-"):
+        await channel.delete()
+        await interaction.response.send_message("Tiket ditutup dan channel dihapus.", ephemeral=True)
+    else:
+        await interaction.response.send_message("Command ini hanya bisa digunakan di channel tiket.", ephemeral=True)
+
+
+# ======= POLLING COMMANDS =======
+class PollView(View):
+    def __init__(self, options):
+        super().__init__(timeout=None)
+        self.options = options
+        self.votes = defaultdict(set)  # {option: set(user_ids)}
+
+        for idx, option in enumerate(options):
+            button = Button(label=option, style=discord.ButtonStyle.primary, custom_id=f"poll_option_{idx}")
+            button.callback = self.vote_callback
+            self.add_item(button)
+
+    async def vote_callback(self, interaction: discord.Interaction):
+        user_id = interaction.user.id
+        # Remove user's previous votes
+        for option in self.votes:
+            if user_id in self.votes[option]:
+                self.votes[option].remove(user_id)
+        # Add new vote
+        clicked_option = interaction.data['custom_id'].replace("poll_option_", "")
+        option_idx = int(clicked_option)
+        option_label = self.options[option_idx]
+        self.votes[option_label].add(user_id)
+
+        # Count votes
+        results = "\n".join(f"**{opt}**: {len(voters)} vote(s)" for opt, voters in self.votes.items())
+        await interaction.response.edit_message(content=f"Polling:\n{results}", view=self)
+
+
+@tree.command(name="poll", description="Buat polling dengan beberapa opsi", guild=discord.Object(id=GUILD_ID))
+@is_admin_prakom()
+@app_commands.describe(question="Pertanyaan polling", options="Opsi-opsi polling, pisahkan dengan koma")
+async def poll(interaction: discord.Interaction, question: str, options: str):
+    options_list = [opt.strip() for opt in options.split(",") if opt.strip()]
+    if len(options_list) < 2:
+        await interaction.response.send_message("Minimal 2 opsi diperlukan.", ephemeral=True)
         return
-    await interaction.response.send_message(
-        f"✅ Tiket telah dibuat: {channel.mention}", ephemeral=True)
-
-    # Kirim pesan dengan tombol close tiket
-    view = View()
-    close_button = Button(label="Tutup Tiket",
-                          style=discord.ButtonStyle.red,
-                          custom_id="close_ticket")
-    view.add_item(close_button)
-    await channel.send(
-        f"{interaction.user.mention} tiket kamu sudah dibuka. Klik tombol dibawah untuk menutup tiket.",
-        view=view)
-
-
-@tree.command(name="userinfo",
-              description="Tampilkan info pengguna",
-              guild=discord.Object(id=GUILD_ID))
-async def userinfo(interaction: discord.Interaction,
-                   member: discord.Member = None):
-    member = member or interaction.user
-    embed = discord.Embed(title=f"Info pengguna: {member}",
-                          color=discord.Color.blue())
-    embed.add_field(name="ID", value=member.id, inline=True)
-    embed.add_field(name="Nama", value=member.name, inline=True)
-    embed.add_field(name="Nickname",
-                    value=member.nick or "Tidak ada",
-                    inline=True)
-    embed.add_field(name="Join Server",
-                    value=member.joined_at.strftime("%Y-%m-%d"),
-                    inline=True)
-    embed.add_field(name="Level",
-                    value=user_level.get(member.id, 0),
-                    inline=True)
-    embed.add_field(name="XP", value=user_xp.get(member.id, 0), inline=True)
-    embed.set_thumbnail(
-        url=member.avatar.url if member.avatar else member.default_avatar.url)
-    await interaction.response.send_message(embed=embed, ephemeral=True)
-
-
-# ======= POLLING COMMAND =======
-EMOJI_OPTIONS = ['1️⃣', '2️⃣', '3️⃣', '4️⃣', '5️⃣', '6️⃣', '7️⃣', '8️⃣', '9️⃣', '🔟']
-
-@tree.command(name="poll",
-              description="Buat polling dengan beberapa opsi",
-              guild=discord.Object(id=GUILD_ID))
-async def poll(interaction: discord.Interaction,
-               question: str,
-               options: str):  # opsi dipisah koma
-    option_list = [opt.strip() for opt in options.split(",")]
-    if len(option_list) < 2 or len(option_list) > 10:
-        await interaction.response.send_message(
-            "❌ Polling harus punya minimal 2 dan maksimal 10 opsi.",
-            ephemeral=True)
+    if len(options_list) > 10:
+        await interaction.response.send_message("Maksimal 10 opsi diperbolehkan.", ephemeral=True)
         return
 
-    embed = discord.Embed(title="📊 Polling", description=question, color=0x00ff00)
-    for idx, option in enumerate(option_list):
-        embed.add_field(name=f"{EMOJI_OPTIONS[idx]} {option}", value='\u200b', inline=False)
-
-    msg = await interaction.channel.send(embed=embed)
-    for i in range(len(option_list)):
-        await msg.add_reaction(EMOJI_OPTIONS[i])
-
-    await interaction.response.send_message(
-        f"✅ Polling dibuat dengan pertanyaan: **{question}**", ephemeral=True)
+    view = PollView(options_list)
+    description = f"**{question}**\nPilih opsi dengan klik tombol di bawah."
+    await interaction.response.send_message(description, view=view)
 
 
 # ======= REMINDER COMMANDS =======
-@tree.command(name="reminder",
-              description="Set pengingat personal (dalam menit)",
-              guild=discord.Object(id=GUILD_ID))
-async def reminder(interaction: discord.Interaction,
-                   minutes: int,
-                   message: str):
-    if minutes < 1 or minutes > 1440:
-        await interaction.response.send_message(
-            "❌ Waktu reminder harus antara 1 sampai 1440 menit (1 hari).",
-            ephemeral=True)
+@tree.command(name="reminder_tambah", description="Tambah reminder satu kali", guild=discord.Object(id=GUILD_ID))
+@app_commands.describe(waktu="Waktu reminder (YYYY-MM-DD HH:MM)", pesan="Pesan reminder")
+async def reminder_tambah(interaction: discord.Interaction, waktu: str, pesan: str):
+    try:
+        remind_time = datetime.strptime(waktu, "%Y-%m-%d %H:%M")
+        if remind_time < datetime.utcnow():
+            await interaction.response.send_message("Waktu reminder harus di masa depan.", ephemeral=True)
+            return
+    except:
+        await interaction.response.send_message("Format waktu salah. Gunakan: YYYY-MM-DD HH:MM", ephemeral=True)
         return
-    remind_time = datetime.utcnow() + timedelta(minutes=minutes)
-    personal_reminders[interaction.user.id].append((remind_time, message))
-    await interaction.response.send_message(
-        f"⏰ Reminder akan saya ingatkan dalam {minutes} menit.", ephemeral=True)
+    user_id = interaction.user.id
+    one_time_reminders[user_id].append((remind_time, pesan))
+    await interaction.response.send_message(f"Reminder satu kali ditambahkan untuk {remind_time}.", ephemeral=True)
 
 
-@tree.command(name="dailyreminder",
-              description="Daftar atau hapus pengingat harian via DM",
-              guild=discord.Object(id=GUILD_ID))
-async def dailyreminder(interaction: discord.Interaction, action: str):
-    action = action.lower()
-    if action == "daftar":
-        daily_reminder_users.add(interaction.user.id)
-        await interaction.response.send_message(
-            "✅ Kamu telah terdaftar untuk pengingat harian via DM.", ephemeral=True)
-    elif action == "hapus":
-        daily_reminder_users.discard(interaction.user.id)
-        await interaction.response.send_message(
-            "✅ Kamu telah dihapus dari daftar pengingat harian.", ephemeral=True)
-    else:
-        await interaction.response.send_message(
-            "Gunakan `daftar` atau `hapus` sebagai parameter.", ephemeral=True)
+@tree.command(name="reminder_hapus_semua", description="Hapus semua reminder kamu", guild=discord.Object(id=GUILD_ID))
+async def reminder_hapus_semua(interaction: discord.Interaction):
+    user_id = interaction.user.id
+    personal_reminders[user_id] = []
+    daily_reminder_users.discard(user_id)
+    weekly_reminders[user_id] = []
+    one_time_reminders[user_id] = []
+    await interaction.response.send_message("Semua reminder kamu telah dihapus.", ephemeral=True)
 
 
-# ======= BACKGROUND TASKS =======
+@tree.command(name="reminder_tambah_mingguan", description="Tambah reminder mingguan", guild=discord.Object(id=GUILD_ID))
+@app_commands.describe(hari="Hari (misal Senin)", jam="Jam (HH:MM)", pesan="Pesan reminder")
+async def reminder_tambah_mingguan(interaction: discord.Interaction, hari: str, jam: str, pesan: str):
+    hari_map = {
+        "senin": 0, "selasa": 1, "rabu": 2, "kamis": 3,
+        "jumat": 4, "sabtu": 5, "minggu": 6
+    }
+    hari_lower = hari.lower()
+    if hari_lower not in hari_map:
+        await interaction.response.send_message("Hari tidak valid. Gunakan Senin, Selasa, ... Minggu.", ephemeral=True)
+        return
+    try:
+        jam_time = datetime.strptime(jam, "%H:%M").time()
+    except:
+        await interaction.response.send_message("Format jam salah. Gunakan HH:MM", ephemeral=True)
+        return
+    user_id = interaction.user.id
+    weekly_reminders[user_id].append((hari_map[hari_lower], jam_time, pesan))
+    await interaction.response.send_message(f"Reminder mingguan ditambahkan setiap {hari} jam {jam}.", ephemeral=True)
+
+
+@tree.command(name="reminder_tambah_publik", description="Tambah reminder publik di channel", guild=discord.Object(id=GUILD_ID))
+@app_commands.describe(channel="Channel tujuan", waktu="Waktu reminder (HH:MM)", pesan="Pesan reminder")
+@is_admin_prakom()
+async def reminder_tambah_publik(interaction: discord.Interaction, channel: discord.TextChannel, waktu: str, pesan: str):
+    try:
+        jam_time = datetime.strptime(waktu, "%H:%M").time()
+    except:
+        await interaction.response.send_message("Format waktu salah. Gunakan HH:MM", ephemeral=True)
+        return
+    public_reminders[channel.id].append((jam_time, pesan))
+    await interaction.response.send_message(f"Reminder publik ditambahkan di {channel.mention} jam {waktu}.", ephemeral=True)
+
+
+# ======= TASKS =======
 @tasks.loop(minutes=1)
 async def daily_reminder_task():
     now = datetime.utcnow()
-    # Kirim reminder personal jika waktunya sudah tiba
-    to_remove = []
-    for user_id, reminders in personal_reminders.items():
-        new_list = []
-        for remind_time, message in reminders:
-            if now >= remind_time:
-                user = bot.get_user(user_id)
-                if user:
-                    try:
-                        await user.send(f"⏰ Pengingatmu: {message}")
-                    except:
-                        pass
-                # jangan masukkan lagi reminder ini ke list baru (artinya dihapus)
-            else:
-                new_list.append((remind_time, message))
-        personal_reminders[user_id] = new_list
-
-    # Kirim pengingat harian pukul 00:00 UTC
-    if now.hour == 3 and now.minute == 15:
-        for user_id in daily_reminder_users:
+    if now.hour == 3 and now.minute == 45:  # Jam 6 pagi UTC bisa disesuaikan
+        for user_id in list(daily_reminder_users):
             user = bot.get_user(user_id)
             if user:
                 try:
@@ -464,36 +438,68 @@ async def daily_reminder_task():
                     pass
 
 
-@tasks.loop(minutes=10)
+@tasks.loop(minutes=1)
+async def weekly_reminder_task():
+    now = datetime.utcnow()
+    weekday = now.weekday()
+    for user_id, reminders in weekly_reminders.items():
+        for day, time_, msg in reminders:
+            if day == weekday and now.hour == time_.hour and now.minute == time_.minute:
+                user = bot.get_user(user_id)
+                if user:
+                    try:
+                        await user.send(f"Reminder mingguan: {msg}")
+                    except:
+                        pass
+
+
+@tasks.loop(minutes=1)
+async def one_time_reminder_task():
+    now = datetime.utcnow()
+    for user_id, reminders in list(one_time_reminders.items()):
+        remaining = []
+        for remind_time, msg in reminders:
+            if remind_time <= now:
+                user = bot.get_user(user_id)
+                if user:
+                    try:
+                        await user.send(f"Reminder: {msg}")
+                    except:
+                        pass
+            else:
+                remaining.append((remind_time, msg))
+        one_time_reminders[user_id] = remaining
+
+
+@tasks.loop(minutes=1)
+async def public_reminder_task():
+    now = datetime.utcnow()
+    for channel_id, reminders in public_reminders.items():
+        for time_, msg in reminders:
+            if now.hour == time_.hour and now.minute == time_.minute:
+                channel = bot.get_channel(channel_id)
+                if channel:
+                    await channel.send(f"🔔 Reminder publik: {msg}")
+
+
+@tasks.loop(minutes=5)
 async def close_inactive_tickets():
     now = datetime.utcnow()
-    to_close = []
-    for channel_id, last_msg_time in inactive_tickets.items():
-        if (now - last_msg_time).seconds > 600:  # 10 menit timeout
-            to_close.append(channel_id)
-
-    for cid in to_close:
-        channel = bot.get_channel(cid)
-        if channel:
-            await channel.send("Tiket ini akan ditutup karena tidak ada aktivitas.")
-            await channel.delete()
-        inactive_tickets.pop(cid, None)
+    for channel_id, last_active in list(inactive_tickets.items()):
+        if (now - last_active).total_seconds() > 3600:  # 1 jam
+            channel = bot.get_channel(channel_id)
+            if channel:
+                try:
+                    await channel.delete()
+                except:
+                    pass
+            del inactive_tickets[channel_id]
 
 
-@bot.event
-async def on_interaction(interaction):
-    # Handle tombol close tiket
-    if interaction.type == discord.InteractionType.component:
-        if interaction.data.get("custom_id") == "close_ticket":
-            channel = interaction.channel
-            await channel.send("Tiket akan ditutup dalam 5 detik...")
-            await asyncio.sleep(5)
-            await channel.delete()
-
-
-# ======= JALANKAN BOT =======
+# ======= RUN BOT =======
 TOKEN = os.getenv("DISCORD_TOKEN")
 if not TOKEN:
-    print("Error: Token bot belum diset di environment variable DISCORD_BOT_TOKEN.")
+    print("Error: DISCORD_BOT_TOKEN environment variable not set!")
 else:
     bot.run(TOKEN)
+
