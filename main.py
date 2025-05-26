@@ -337,7 +337,6 @@ async def set_reminder(
     else:
         await interaction.followup.send("Tipe reminder tidak valid. Gunakan 'sekali' atau 'publik'.", ephemeral=True)
 
----
 ### Perintah Khusus Admin dan Informasi
 
 @tree.command(name="reminder_role", description="Kirim pengingat ke role tertentu pada waktu spesifik (Admin Only).", guild=discord.Object(id=GUILD_ID))
