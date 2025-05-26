@@ -5,7 +5,7 @@ import asyncio
 from collections import defaultdict
 from datetime import datetime, time, timedelta, timezone
 import random
-import json # Tambahkan ini untuk menyimpan/membaca data
+import json
 
 from discord import app_commands
 from discord.ext.commands import has_role
@@ -15,6 +15,8 @@ from discord.ui import View, Button
 GUILD_ID = 1375444915403751424
 POST_CHANNEL_ID = 1375939507114741872
 DAILY_ANNOUNCEMENT_CHANNEL_ID = 1375939507114741872
+# Ganti channel ID ini menjadi channel "Selamat Datang" Anda
+WELCOME_CHANNEL_ID = 1375824875838505020 
 VERIFICATION_CHANNEL_ID = 1375775766482128906
 GENDER_CHANNEL_ID = 1375768360637436005
 LOG_CHANNEL_ID = 1375886856188727357
@@ -23,7 +25,7 @@ ANNOUNCEMENT_CHANNEL_ID = 1375821960637845564
 MUTE_ROLE_NAME = "Muted"
 ADMIN_PRAKOM_ROLE = "Admin Prakom"
 TICKET_CATEGORY_NAME = "Tiket"
-UNVERIFIED_ROLE_NAME = "Unverified" # Tambahkan ini untuk role unverified
+UNVERIFIED_ROLE_NAME = "Unverified" 
 
 SPAM_THRESHOLD = 5
 SPAM_INTERVAL = 10  # detik
@@ -32,7 +34,7 @@ MUTE_DURATION = 60  # detik
 # File data untuk persistensi
 WARN_DATA_FILE = "warn_data.json"
 PRIVATE_REMINDER_DATA_FILE = "private_reminders.json"
-ROLE_REMINDER_DATA_FILE = "role_reminders.json" # Untuk menyimpan pengingat role dan pengumuman terjadwal
+ROLE_REMINDER_DATA_FILE = "role_reminders.json"
 
 intents = discord.Intents.default()
 intents.members = True
@@ -50,13 +52,13 @@ user_messages = defaultdict(list)
 user_xp = defaultdict(int)
 user_level = defaultdict(int)
 
-public_reminders = defaultdict(list) # Untuk pengingat publik HH:MM (tidak disimpan ke file secara default di kode ini)
+public_reminders = defaultdict(list) 
 inactive_tickets = {}
 
 # Data yang akan disimpan ke file
 warn_data = {}
 private_reminders_data = {}
-role_reminders = [] # List berisi dict reminder ke role, termasuk scheduled_announcement
+role_reminders = [] 
 
 # ======= FUNGSI LOAD/SAVE DATA =======
 def load_warn_data():
@@ -104,31 +106,25 @@ def load_role_reminders():
     if os.path.exists(ROLE_REMINDER_DATA_FILE):
         with open(ROLE_REMINDER_DATA_FILE, 'r') as f:
             data = json.load(f)
-            # Konversi kembali datetime dan pastikan role_id ada jika tipe 'role'
             role_reminders = []
             for rem in data:
                 if "waktu" in rem:
                     rem["waktu"] = datetime.fromisoformat(rem["waktu"])
-                # Pastikan role_id ada untuk tipe 'role'
                 if rem.get("tipe") == "role" and "role_id" in rem:
-                    # Anda tidak bisa langsung merekonstruksi discord.Role objek di sini,
-                    # itu akan dilakukan saat bot berjalan dan memanggil get_role().
-                    pass # Biarkan role_id apa adanya
+                    pass
                 role_reminders.append(rem)
     else:
         role_reminders = []
 
 def save_role_reminders():
-    # Konversi objek datetime menjadi string isoformat untuk penyimpanan
     data_to_save = []
     for rem in role_reminders:
         temp_rem = rem.copy()
         if "waktu" in temp_rem and isinstance(temp_rem["waktu"], datetime):
             temp_rem["waktu"] = temp_rem["waktu"].isoformat()
-        # Jika tipe 'role', pastikan hanya menyimpan 'role_id' bukan objek 'role'
         if temp_rem.get("tipe") == "role" and isinstance(temp_rem.get("role"), discord.Role):
             temp_rem["role_id"] = temp_rem["role"].id
-            del temp_rem["role"] # Hapus objek role
+            del temp_rem["role"] 
         data_to_save.append(temp_rem)
     with open(ROLE_REMINDER_DATA_FILE, 'w') as f:
         json.dump(data_to_save, f, indent=4)
@@ -209,19 +205,18 @@ async def on_ready():
     print(f"✅ Bot aktif sebagai {bot.user}")
     load_warn_data()
     load_private_reminders()
-    load_role_reminders() # Memuat pengingat role dan pengumuman terjadwal
+    load_role_reminders()
     try:
         synced = await tree.sync(guild=discord.Object(id=GUILD_ID))
         print(f"Slash commands synced: {len(synced)}")
     except Exception as e:
         print(f"Gagal sync slash commands: {e}")
 
-    # Mulai tugas berulang
     daily_reminder_task.start()
     public_reminder_task.start()
     close_inactive_tickets.start()
     check_role_reminders.start()
-    check_private_reminders.start() # Mulai tugas untuk pengingat pribadi
+    check_private_reminders.start()
 
 @bot.event
 async def on_member_join(member):
@@ -250,23 +245,25 @@ async def on_member_join(member):
     except discord.Forbidden:
         print(f"Gagal mengirim DM sambutan ke {member}.")
 
-    # Kirim pesan sambutan ke channel umum (misal: DAILY_ANNOUNCEMENT_CHANNEL_ID atau channel welcome khusus)
-    welcome_channel = guild.get_channel(DAILY_ANNOUNCEMENT_CHANNEL_ID) # Anda bisa ganti ini dengan WELCOME_CHANNEL_ID jika punya
+    # Kirim pesan sambutan ke channel 'Selamat Datang'
+    welcome_channel = guild.get_channel(WELCOME_CHANNEL_ID) 
     if welcome_channel:
         embed = discord.Embed(
-            title=f"Selamat Datang di {guild.name}, {member.display_name}! 🎉",
+            title=f"Halo {member.display_name}! Selamat Datang di {guild.name} 👋",
             description=(
-                f"Kami senang Anda bergabung dengan komunitas kami. "
-                f"Jangan lupa untuk:\n"
-                f"1. Melakukan verifikasi di <#{VERIFICATION_CHANNEL_ID}> dengan nama asli Anda.\n"
-                f"2. Memilih jenis kelamin di <#{GENDER_CHANNEL_ID}>.\n"
-                f"3. Membaca <#{ANNOUNCEMENT_CHANNEL_ID}> untuk aturan dan informasi penting." # Ganti ANNOUNCEMENT_CHANNEL_ID jika ada channel aturan spesifik
+                f"Kami sangat senang kamu bergabung dengan keluarga Prakom di sini!\n\n"
+                f"Untuk memulai, mohon lakukan beberapa langkah mudah berikut:\n"
+                f"1. **Verifikasi:** Kirim nama asli kamu di <#{VERIFICATION_CHANNEL_ID}>.\n"
+                f"2. **Pilih Gender:** Setelah verifikasi, pilih jenis kelaminmu di <#{GENDER_CHANNEL_ID}> untuk mendapatkan peran yang sesuai.\n"
+                f"3. **Pahami Aturan:** Pastikan kamu membaca dan memahami <#{ANNOUNCEMENT_CHANNEL_ID}> agar kita semua bisa berinteraksi dengan nyaman dan positif." # Ganti ANNOUNCEMENT_CHANNEL_ID jika ada channel aturan spesifik
             ),
-            color=discord.Color.gold()
+            color=discord.Color.blue() # Warna bisa diubah sesuai keinginan
         )
         embed.set_thumbnail(url=member.display_avatar.url)
-        embed.set_footer(text="Semoga betah dan aktif di sini!")
-        await welcome_channel.send(f"Halo {member.mention}!", embed=embed)
+        embed.set_footer(text="Ayo bangun komunitas yang aktif dan saling mendukung!")
+        
+        # Mengirim pesan sambutan ke channel 'Selamat Datang' tanpa menumpuk
+        await welcome_channel.send(f"Selamat datang {member.mention}!", embed=embed)
 
 
 @bot.event
@@ -274,11 +271,9 @@ async def on_message(message):
     if message.author.bot:
         return
 
-    # Update last activity for tickets
     if message.channel.id in inactive_tickets:
         inactive_tickets[message.channel.id] = datetime.now(WIB)
 
-    # ANTI-SPAM
     now = datetime.now(WIB)
     timestamps = user_messages[message.author.id]
     timestamps = [ts for ts in timestamps if (now - ts).seconds < SPAM_INTERVAL]
@@ -302,7 +297,6 @@ async def on_message(message):
             pass
         return
 
-    # SISTEM LEVELING
     user_xp[message.author.id] += 5
     level = user_level[message.author.id]
     next_level_xp = (level + 1) * 100
@@ -312,7 +306,6 @@ async def on_message(message):
             f"🎉 {message.author.mention} naik level ke {user_level[message.author.id]}! Keep it up!"
         )
 
-    # VERIFIKASI
     if message.guild and message.guild.id == GUILD_ID and message.channel.id == VERIFICATION_CHANNEL_ID:
         member = message.author
         guild = message.guild
@@ -379,15 +372,13 @@ async def on_reaction_add(reaction, user):
     elif reaction.emoji == "👨":
         role_to_add = discord.utils.get(guild.roles, name="Prakom Ganteng")
     else:
-        return # Jika emoji yang direaksikan bukan yang diharapkan, hentikan proses
+        return 
 
     if role_to_add:
         try:
-            # Tambahkan role baru
             await user.add_roles(role_to_add)
             await reaction.message.channel.send(f"{user.mention} sudah memilih {role_to_add.name}")
 
-            # Hapus role 'Anggota' jika ada
             role_anggota = discord.utils.get(guild.roles, name="Anggota")
             if role_anggota and role_anggota in user.roles:
                 await user.remove_roles(role_anggota)
@@ -437,7 +428,7 @@ async def set_reminder(
                 "channel_id": interaction.channel.id,
                 "creator_id": interaction.user.id
             })
-            save_role_reminders() # Simpan perubahan
+            save_role_reminders() 
             await interaction.followup.send(f"Reminder sekali set untuk **{dt.strftime('%d %b %Y %H:%M WIB')}** di channel ini.", ephemeral=True)
         except ValueError:
             await interaction.followup.send("Format waktu sekali harus YYYY-MM-DDTHH:MM (contoh: 2025-05-26T14:30).", ephemeral=True)
@@ -445,10 +436,8 @@ async def set_reminder(
     elif tipe == "publik":
         channel = interaction.channel
         try:
-            datetime.strptime(waktu, "%H:%M") # Cek format HH:MM
+            datetime.strptime(waktu, "%H:%M") 
             public_reminders[channel.id].append((waktu, pesan))
-            # Catatan: public_reminders saat ini tidak disimpan ke file, akan hilang saat bot restart.
-            # Jika ingin disimpan, perlu mekanisme load/save terpisah atau gabungkan ke role_reminders.
             await interaction.followup.send(f"Reminder publik set di channel ini pada jam **{waktu} WIB**.", ephemeral=True)
         except ValueError:
             await interaction.followup.send("Format waktu publik harus HH:MM (24 jam, contoh: 14:30).", ephemeral=True)
@@ -518,6 +507,7 @@ async def ping(interaction: discord.Interaction):
     await interaction.followup.send(f"Pong! Latensi: {round(bot.latency * 1000)} ms")
 
 
+
 ## Perintah Moderasi (Admin Only)
 
 @tree.command(name="clear", description="Hapus pesan dalam jumlah tertentu", guild=discord.Object(id=GUILD_ID))
@@ -560,7 +550,7 @@ async def warn(interaction: discord.Interaction, member: discord.Member, reason:
     try:
         await member.send(f"Anda telah diberi peringatan di **{interaction.guild.name}** dengan alasan: **{reason}**")
     except discord.Forbidden:
-        pass # Gagal DM, biarkan saja
+        pass 
 
     await interaction.followup.send(f"✅ {member.mention} berhasil diberi peringatan. Ini adalah peringatan ke-{len(warn_data[member_id_str])} nya.", ephemeral=True)
 
@@ -677,13 +667,12 @@ async def unban(interaction: discord.Interaction, user_id: str, reason: str = "T
     await interaction.response.defer(ephemeral=True)
     
     try:
-        user_id_int = int(user_id) # Ubah ke int untuk discord.Object
+        user_id_int = int(user_id) 
     except ValueError:
         await interaction.followup.send("❌ ID pengguna harus berupa angka.", ephemeral=True)
         return
 
     try:
-        # discord.Object digunakan karena user mungkin tidak lagi di server
         user = discord.Object(id=user_id_int) 
         await interaction.guild.unban(user, reason=reason)
         log_channel = interaction.guild.get_channel(LOGADMIN_CHANNEL_ID)
@@ -696,6 +685,7 @@ async def unban(interaction: discord.Interaction, user_id: str, reason: str = "T
         await interaction.followup.send("❌ Saya tidak memiliki izin untuk membatalkan larangan anggota ini.", ephemeral=True)
     except Exception as e:
         await interaction.followup.send(f"❌ Terjadi kesalahan: {e}", ephemeral=True)
+
 
 
 ## Command Manajemen Tiket
@@ -723,6 +713,7 @@ async def tutup_tiket(interaction: discord.Interaction):
             await interaction.channel.send("❌ Gagal menutup tiket. Periksa izin bot.")
     else:
         await interaction.response.send_message("Command ini hanya bisa dipakai di channel tiket.", ephemeral=True)
+
 
 
 ## Command Pengumuman Admin
@@ -771,7 +762,7 @@ async def schedule_announcement(
             "channel_id": channel.id,
             "creator_id": user_id
         })
-        save_role_reminders() # Simpan perubahan
+        save_role_reminders() 
         
         await interaction.followup.send(f"✅ Pengumuman terjadwal berhasil disimpan untuk **{announce_time_obj.strftime('%d %b %Y %H:%M WIB')}** di {channel.mention}.", ephemeral=True)
 
@@ -867,6 +858,7 @@ async def remove_my_reminder(interaction: discord.Interaction, nomor_pengingat: 
     await interaction.followup.send(f"✅ Pengingat pribadi **'{removed_reminder['message']}'** berhasil dihapus.", ephemeral=True)
 
 
+
 ## Command Pengingat Role (Admin Only)
 
 @tree.command(name="reminder_role", description="Kirim pengingat ke role tertentu pada waktu spesifik (Admin Only).", guild=discord.Object(id=GUILD_ID))
@@ -898,11 +890,11 @@ async def reminder_role(
             "tipe": "role",
             "waktu": remind_time_obj,
             "pesan": pesan,
-            "role_id": role.id, # Simpan hanya ID role
+            "role_id": role.id, 
             "channel_id": interaction.channel.id,
             "creator_id": user_id
         })
-        save_role_reminders() # Simpan perubahan
+        save_role_reminders() 
         await interaction.followup.send(f"✅ Pengingat untuk **{role.name}** berhasil disimpan pada **{remind_time_obj.strftime('%d %b %Y %H:%M WIB')}** di channel ini.", ephemeral=True)
 
     except ValueError:
@@ -917,7 +909,6 @@ async def list_reminder(interaction: discord.Interaction):
     user_id = interaction.user.id
     msg = ""
 
-    # Daftar pengingat publik di channel ini
     current_channel_id = interaction.channel.id
     if current_channel_id in public_reminders and public_reminders[current_channel_id]:
         msg += "**Pengingat Publik di channel ini:**\n"
@@ -926,7 +917,6 @@ async def list_reminder(interaction: discord.Interaction):
     else:
         msg += "**Pengingat Publik di channel ini:** Tidak ada\n"
 
-    # Daftar pengingat sekali, role, atau pengumuman terjadwal yang dibuat oleh user ini
     user_created_reminders = [
         r for r in role_reminders if r.get("creator_id") == user_id
     ]
@@ -936,7 +926,7 @@ async def list_reminder(interaction: discord.Interaction):
             waktu_str = rem['waktu'].strftime("%d %b %Y %H:%M WIB")
             if rem["tipe"] == "role":
                 guild = interaction.guild
-                fetched_role = guild.get_role(rem['role_id']) # Ambil objek role dari ID
+                fetched_role = guild.get_role(rem['role_id']) 
                 role_name = fetched_role.name if fetched_role else "Role Tidak Ditemukan"
                 msg += f"  - Untuk role **{role_name}** pada {waktu_str} di channel <#{rem['channel_id']}>: {rem['pesan']}\n"
             elif rem["tipe"] == "sekali_channel":
@@ -954,16 +944,15 @@ async def remove_reminder(interaction: discord.Interaction):
     await interaction.response.defer(ephemeral=True)
     user_id = interaction.user.id
     
-    # Hapus pengingat publik di channel ini
     if interaction.channel.id in public_reminders:
-        public_reminders.pop(interaction.channel.id, None) # Hapus semua public reminder di channel ini
+        public_reminders.pop(interaction.channel.id, None) 
 
     global role_reminders
-    # Hapus pengingat sekali, role, atau pengumuman terjadwal yang dibuat oleh user ini
     role_reminders = [r for r in role_reminders if r.get("creator_id") != user_id]
-    save_role_reminders() # Simpan perubahan
+    save_role_reminders() 
 
     await interaction.followup.send("✅ Semua pengingat publik di channel ini dan pengingat sekali/role/pengumuman terjadwal yang kamu buat sudah dihapus.", ephemeral=True)
+
 
 
 ## Sistem Polling
@@ -1008,7 +997,6 @@ async def poll(
         await message.add_reaction(reactions[i])
 
     await interaction.followup.send("Polling berhasil dibuat!", ephemeral=True)
-
 
 # TASKS BERULANG OTOMATIS
 
@@ -1062,8 +1050,8 @@ async def check_role_reminders():
             if channel:
                 try:
                     if reminder["tipe"] == "role":
-                        guild = channel.guild # Dapatkan guild dari channel
-                        role = guild.get_role(reminder["role_id"]) # Ambil objek role dari ID
+                        guild = channel.guild 
+                        role = guild.get_role(reminder["role_id"]) 
                         if role:
                             await channel.send(f"{role.mention} {message}")
                         else:
@@ -1080,7 +1068,7 @@ async def check_role_reminders():
             to_remove_reminders.append(reminder)
     
     role_reminders = [r for r in role_reminders if r not in to_remove_reminders]
-    if to_remove_reminders: # Hanya simpan jika ada perubahan
+    if to_remove_reminders:
         save_role_reminders()
 
 @tasks.loop(minutes=1)
@@ -1123,7 +1111,7 @@ async def close_inactive_tickets():
     to_close = []
     for channel_id, last_active in inactive_tickets.items():
         elapsed = (now - last_active).total_seconds()
-        if elapsed > 1800:  # 30 menit = 1800 detik
+        if elapsed > 1800:
             to_close.append(channel_id)
 
     guild = bot.get_guild(GUILD_ID)
