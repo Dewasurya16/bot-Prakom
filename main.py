@@ -4,13 +4,13 @@ from discord.ext import commands, tasks
 import asyncio
 from collections import defaultdict
 from datetime import datetime, time, timedelta, timezone
-import random # Tambahkan import random untuk daily_quotes
+import random
 
 from discord import app_commands
 from discord.ext.commands import has_role
 from discord.ui import View, Button
 
-# ======= CONFIGURATION =======
+# ======= KONFIGURASI =======
 GUILD_ID = 1375444915403751424
 POST_CHANNEL_ID = 1375939507114741872
 DAILY_ANNOUNCEMENT_CHANNEL_ID = 1375939507114741872
@@ -36,13 +36,13 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 tree = bot.tree
 
 # DEFINISI ZONA WAKTU WIB (UTC+7)
-WIB = timezone(timedelta(hours=7)) # Tambahkan baris ini
+WIB = timezone(timedelta(hours=7))
 
-# ======= GLOBALS =======
+# ======= GLOBAL =======
 user_messages = defaultdict(list)
 user_xp = defaultdict(int)
 user_level = defaultdict(int)
-personal_reminders = defaultdict(list)
+# personal_reminders dihapus karena tidak ada implementasi loop untuknya
 daily_reminder_users = set()
 weekly_reminders = defaultdict(list)
 one_time_reminders = defaultdict(list)
@@ -52,7 +52,7 @@ inactive_tickets = {}
 # Tempat menyimpan semua reminder ke role
 role_reminders = []  # List berisi dict reminder ke role
 
-# ======= QUOTES & TEMPLATES =======
+# ======= KUTIPAN & TEMPLAT =======
 DAILY_QUOTES = [
     "Tetap semangat, hari ini penuh peluang!",
     "Jangan menyerah, kamu lebih kuat dari yang kamu kira.",
@@ -92,7 +92,7 @@ DAILY_DM_TEMPLATE = (
     "- Semangat terus dan tetap fokus! 💪"
 )
 
-# ======= HELPER FUNCTIONS =======
+# ======= FUNGSI BANTUAN =======
 def is_admin_prakom():
     async def predicate(interaction: discord.Interaction):
         role = discord.utils.get(interaction.user.roles, name=ADMIN_PRAKOM_ROLE)
@@ -196,7 +196,7 @@ async def on_message(message):
             pass
         return
 
-    # LEVELING SYSTEM
+    # SISTEM LEVELING
     user_xp[message.author.id] += 5
     level = user_level[message.author.id]
     next_level_xp = (level + 1) * 100
@@ -280,7 +280,7 @@ async def on_reaction_add(reaction, user):
             pass
 
 
-# ======= COMMANDS =======
+# ======= PERINTAH =======
 @tree.command(name="set_reminder", description="Set reminder: sekali, harian, mingguan, publik", guild=discord.Object(id=GUILD_ID))
 @app_commands.describe(
     tipe="Tipe reminder: sekali, harian, mingguan, publik",
@@ -346,7 +346,9 @@ async def set_reminder(
     else:
         await interaction.followup.send("Tipe reminder tidak valid. Gunakan 'sekali', 'harian', 'mingguan', atau 'publik'.", ephemeral=True)
 
-### Perintah Khusus Role Reminder dan Mars Adhyaksa
+---
+### Perintah Khusus Admin dan Informasi
+
 @tree.command(name="reminder", description="Kirim pengingat ke role tertentu pada waktu spesifik.", guild=discord.Object(id=GUILD_ID))
 @app_commands.describe(
     role="Role yang akan di-mention",
@@ -393,7 +395,6 @@ async def reminder(
 
 @tree.command(name="mars_adhyaksa", description="Menampilkan lirik Mars Adhyaksa.", guild=discord.Object(id=GUILD_ID))
 async def mars_adhyaksa(interaction: discord.Interaction):
-    # Lirik Mars Adhyaksa yang sudah diperbaiki
     mars_text = """
 **MARS ADHYAKSA**
 
@@ -415,6 +416,22 @@ Tersirat dan tersurat imbangan
 Tegarlah sepanjang zaman..
 """
     await interaction.response.send_message(mars_text)
+
+@tree.command(name="tri_karma_adhyaksa", description="Menampilkan Tri Karma Adhyaksa.", guild=discord.Object(id=GUILD_ID))
+async def tri_karma_adhyaksa(interaction: discord.Interaction):
+    tri_karma_text = """
+**TRI KARMA ADHYAKSA**
+
+1.  **Satya**
+    Kesetiaan yang tanpa batas terhadap Tuhan Yang Maha Esa, Negara dan Masyarakat.
+
+2.  **Adi**
+    Yakni kemampuan dan kemauan mencapai kesempurnaan dalam pelaksanaan tugas dan kewajiban serta senantiasa berpegang teguh pada kebenaran.
+
+3.  **Wicaksana**
+    Bijaksana dalam tutur kata dan tingkah laku, baik di dalam maupun di luar kedinasan.
+"""
+    await interaction.response.send_message(tri_karma_text)
 
 @tree.command(name="userinfo", description="Tampilkan info pengguna", guild=discord.Object(id=GUILD_ID))
 @app_commands.describe(user="User yang ingin dilihat info-nya (opsional)")
@@ -483,7 +500,7 @@ async def pengumuman(interaction: discord.Interaction, pesan: str):
     await interaction.followup.send("Pengumuman terkirim.", ephemeral=True)
 
 
-# ======= DAILY ANNOUNCEMENT TASK =======
+# ======= TUGAS PENGINGAT HARIAN =======
 @tasks.loop(hours=24)
 async def daily_reminder_task():
     await bot.wait_until_ready()
@@ -506,7 +523,7 @@ async def daily_reminder_task():
                 pass
 
 
-# ======= WEEKLY REMINDER TASK =======
+# ======= TUGAS PENGINGAT MINGGUAN =======
 @tasks.loop(minutes=1)
 async def weekly_reminder_task():
     await bot.wait_until_ready()
@@ -531,7 +548,7 @@ async def weekly_reminder_task():
                     pass
 
 
-# ======= ONE-TIME REMINDER TASK =======
+# ======= TUGAS PENGINGAT SEKALI =======
 @tasks.loop(minutes=1)
 async def one_time_reminder_task():
     await bot.wait_until_ready()
@@ -561,7 +578,7 @@ async def one_time_reminder_task():
         ]
 
 
-# ======= PUBLIC REMINDER TASK =======
+# ======= TUGAS PENGINGAT PUBLIK =======
 @tasks.loop(minutes=1)
 async def public_reminder_task():
     await bot.wait_until_ready()
@@ -578,7 +595,7 @@ async def public_reminder_task():
                 except:
                     pass
 
-# ======= ROLE REMINDER TASK =======
+# ======= TUGAS PENGINGAT ROLE =======
 @tasks.loop(minutes=1)
 async def check_role_reminders():
     await bot.wait_until_ready()
@@ -603,7 +620,7 @@ async def check_role_reminders():
     for rem in to_remove_role_reminders:
         role_reminders = [r for r in role_reminders if r != rem]
 
-# ======= CLOSE INACTIVE TICKETS =======#
+# ======= TUTUP TIKET TIDAK AKTIF =======
 @tasks.loop(minutes=30)
 async def close_inactive_tickets():
     await bot.wait_until_ready()
@@ -631,7 +648,7 @@ async def close_inactive_tickets():
         inactive_tickets.pop(channel_id, None)
 
 
-# ======= POLLING SYSTEM =======
+# ======= SISTEM POLLING =======
 @tree.command(name="poll", description="Buat polling dengan beberapa opsi", guild=discord.Object(id=GUILD_ID))
 @app_commands.describe(
     question="Pertanyaan polling",
@@ -673,7 +690,7 @@ async def poll(
 
     await interaction.followup.send("Polling berhasil dibuat!", ephemeral=True)
 
-# ======= REMINDER COMMANDS (UPDATED) =======
+# ======= PERINTAH PENGINGAT (DIPERBARUI) =======
 
 @tree.command(name="list_reminder", description="Lihat daftar reminder kamu", guild=discord.Object(id=GUILD_ID))
 async def list_reminder(interaction: discord.Interaction):
@@ -730,7 +747,7 @@ async def remove_reminder(interaction: discord.Interaction):
     await interaction.followup.send("Semua reminder pribadi kamu sudah dihapus. Reminder role yang kamu buat juga telah dihapus.", ephemeral=True)
 
 
-# ======= RUN BOT =======
+# ======= JALANKAN BOT =======
 if __name__ == "__main__":
     TOKEN = os.getenv("DISCORD_TOKEN")
     if not TOKEN:
