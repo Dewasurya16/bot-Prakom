@@ -252,10 +252,11 @@ async def on_member_join(member):
             title=f"Halo {member.display_name}! Selamat Datang di {guild.name} 👋",
             description=(
                 f"Kami sangat senang kamu bergabung dengan keluarga Prakom di sini!\n\n"
-                f"Untuk memulai, mohon lakukan beberapa langkah mudah berikut:\n"
-                f"1. **Verifikasi:** Kirim nama asli kamu di <#{VERIFICATION_CHANNEL_ID}>.\n"
-                f"2. **Pilih Gender:** Setelah verifikasi, pilih jenis kelaminmu di <#{GENDER_CHANNEL_ID}> untuk mendapatkan peran yang sesuai.\n"
-                f"3. **Pahami Aturan:** Pastikan kamu membaca dan memahami <#{ANNOUNCEMENT_CHANNEL_ID}> agar kita semua bisa berinteraksi dengan nyaman dan positif." # Ganti ANNOUNCEMENT_CHANNEL_ID jika ada channel aturan spesifik
+            f"Sebelum mulai seru-seruan, ada satu hal penting yang perlu kamu tahu:\n"
+            f"1. **Pahami Aturan:** Pastikan kamu membaca dan memahami <#{ANNOUNCEMENT_CHANNEL_ID}> agar kita semua bisa berinteraksi dengan nyaman dan positif.\n\n"
+            f"Selamat menjelajah dan berinteraksi di komunitas Prakom!"
+                 f"Kami tak sabar melihat kontribusimu!"
+                 # Ganti ANNOUNCEMENT_CHANNEL_ID jika ada channel aturan spesifik
             ),
             color=discord.Color.blue() # Warna bisa diubah sesuai keinginan
         )
