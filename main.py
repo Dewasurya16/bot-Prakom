@@ -346,11 +346,7 @@ async def set_reminder(
     else:
         await interaction.followup.send("Tipe reminder tidak valid. Gunakan 'sekali', 'harian', 'mingguan', atau 'publik'.", ephemeral=True)
 
----
-
 ### Perintah Khusus Role Reminder dan Mars Adhyaksa
-
-```python
 @tree.command(name="reminder", description="Kirim pengingat ke role tertentu pada waktu spesifik.", guild=discord.Object(id=GUILD_ID))
 @app_commands.describe(
     role="Role yang akan di-mention",
