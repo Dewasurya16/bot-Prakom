@@ -697,7 +697,6 @@ async def unban(interaction: discord.Interaction, user_id: str, reason: str = "T
     except Exception as e:
         await interaction.followup.send(f"❌ Terjadi kesalahan: {e}", ephemeral=True)
 
----
 
 ## Command Manajemen Tiket
 
