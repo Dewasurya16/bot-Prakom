@@ -442,45 +442,47 @@ async def close_inactive_tickets():
 
 
 # ======= POLLING SYSTEM =======
-class PollView(View):
-    def __init__(self, options):
-        super().__init__(timeout=None)
-        self.votes = {opt: 0 for opt in options}
-        self.user_votes = {}  # user_id: option
-        self.options = options
-        emojis = ['1️⃣', '2️⃣', '3️⃣', '4️⃣', '5️⃣', '6️⃣', '7️⃣', '8️⃣', '9️⃣', '🔟']
-        for i, opt in enumerate(options):
-            btn = Button(label=opt, style=discord.ButtonStyle.primary, emoji=emojis[i])
-            btn.callback = self.make_vote_callback(opt)
-            self.add_item(btn)
-
-    def make_vote_callback(self, option):
-        async def callback(interaction: discord.Interaction):
-            user_id = interaction.user.id
-            prev_vote = self.user_votes.get(user_id)
-            if prev_vote:
-                self.votes[prev_vote] -= 1
-            self.votes[option] += 1
-            self.user_votes[user_id] = option
-            # Update embed vote count
-            desc = "\n".join([f"{opt}: {self.votes[opt]} suara" for opt in self.options])
-            embed = discord.Embed(title="Polling", description=desc, color=0x00ff00)
-            await interaction.message.edit(embed=embed, view=self)
-            await interaction.response.send_message(f"Kamu memilih: {option}", ephemeral=True)
-        return callback
-
-
 @tree.command(name="poll", description="Buat polling dengan beberapa opsi", guild=discord.Object(id=GUILD_ID))
-async def poll(interaction: discord.Interaction, question: str, *options: str):
-    if len(options) < 2 or len(options) > 10:
-        await interaction.response.send_message(
-            "Polling harus punya minimal 2 dan maksimal 10 opsi.", ephemeral=True)
-        return
+@app_commands.describe(
+    question="Pertanyaan polling",
+    option1="Opsi 1",
+    option2="Opsi 2",
+    option3="Opsi 3 (opsional)",
+    option4="Opsi 4 (opsional)",
+    option5="Opsi 5 (opsional)"
+)
+async def poll(
+    interaction: discord.Interaction,
+    question: str,
+    option1: str,
+    option2: str,
+    option3: str = None,
+    option4: str = None,
+    option5: str = None
+):
+    options = [option1, option2]
+    if option3:
+        options.append(option3)
+    if option4:
+        options.append(option4)
+    if option5:
+        options.append(option5)
 
-    desc = "\n".join([f"{opt}: 0 suara" for opt in options])
-    embed = discord.Embed(title=f"Polling: {question}", description=desc, color=0x00ff00)
-    view = PollView(options)
-    await interaction.response.send_message(embed=embed, view=view)
+    reactions = ["1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣"]
+    
+    embed = discord.Embed(title="Polling", description=question, color=discord.Color.green())
+    description = ""
+    for i, option in enumerate(options):
+        description += f"{reactions[i]} {option}\n"
+    embed.description = description
+
+    message = await interaction.channel.send(embed=embed)
+    for i in range(len(options)):
+        await message.add_reaction(reactions[i])
+
+    await interaction.response.send_message("Polling berhasil dibuat!", ephemeral=True)
+
+
 
 
 # ======= REMINDER COMMANDS =======
