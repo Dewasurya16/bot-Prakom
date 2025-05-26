@@ -246,19 +246,19 @@ async def on_member_join(member):
         print(f"Gagal mengirim DM sambutan ke {member}.")
 
     # Kirim pesan sambutan ke channel 'Selamat Datang'
-    welcome_channel = guild.get_channel(WELCOME_CHANNEL_ID) 
-    if welcome_channel:
-        embed = discord.Embed(
-            title=f"Halo {member.display_name}! Selamat Datang di {guild.name} 👋",
-            description=(
-                f"Kami sangat senang kamu bergabung dengan keluarga Prakom di sini!\n\n"
-            f"Sebelum mulai seru-seruan, ada satu hal penting yang perlu kamu tahu:\n"
-            f"1. **Pahami Aturan:** Pastikan kamu membaca dan memahami <#{ANNOUNCEMENT_CHANNEL_ID}> agar kita semua bisa berinteraksi dengan nyaman dan positif.\n\n"
-            f"Selamat menjelajah dan berinteraksi di komunitas Prakom!"
-                 f"Kami tak sabar melihat kontribusimu!"
-                 # Ganti ANNOUNCEMENT_CHANNEL_ID jika ada channel aturan spesifik
-            ),
-            color=discord.Color.blue() # Warna bisa diubah sesuai keinginan
+   welcome_channel = guild.get_channel(WELCOME_CHANNEL_ID) 
+if welcome_channel:
+    embed = discord.Embed(
+        title=f"🎉 Welcome, {member.display_name} ke {guild.name}! 🎉",
+        description=(
+            f"Asik, kamu udah resmi jadi bagian dari komunitas Prakom! 😎\n\n"
+            f"Biar makin *smooth* di sini, ada 1 *step* terakhir nih:\n"
+            f"**1.** 📖 **Cek Aturan Main:** Jangan lupa baca dan pahami <#{ANNOUNCEMENT_CHANNEL_ID}> ya, demi kenyamanan bareng.\n\n"
+            f"Siap buat *ngobrol* & *explore*? Gas! Kami tunggu keseruannya! 🚀"
+        ),
+        color=discord.Color.teal() # Pilihan warna lain yang modern
+    )
+    await welcome_channel.send(embed=embed)
         )
         embed.set_thumbnail(url=member.display_avatar.url)
         embed.set_footer(text="Ayo bangun komunitas yang aktif dan saling mendukung!")
