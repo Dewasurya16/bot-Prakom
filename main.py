@@ -46,6 +46,9 @@ one_time_reminders = defaultdict(list)  # {user_id: [(datetime, message), ...]}
 public_reminders = defaultdict(list)    # {channel_id: [(time, message), ...]}
 inactive_tickets = {} 
 
+# Tempat menyimpan semua reminder ke role
+role_reminders = []  # List berisi dict reminder ke role
+
 # ======= QUOTES & TEMPLATES =======
 DAILY_QUOTES = [
     "Tetap semangat, hari ini penuh peluang!",
@@ -263,6 +266,61 @@ async def on_reaction_add(reaction, user):
 
 
 # ======= COMMANDS =======
+@tree.command(name="set_reminder", description="Set reminder ke role: sekali, harian, atau mingguan", guild=discord.Object(id=GUILD_ID))
+@app_commands.describe(
+    tipe="Tipe reminder: sekali, harian, mingguan",
+    waktu="Waktu pengingat. Format HH:MM untuk harian/mingguan, ISO datetime untuk sekali",
+    pesan="Pesan reminder yang akan dikirim",
+    role="Role yang akan di-mention",
+    hari="Untuk tipe mingguan: 0=Senin ... 6=Minggu"
+)
+async def set_reminder(
+    interaction: discord.Interaction,
+    tipe: str,
+    waktu: str,
+    pesan: str,
+    role: discord.Role,
+    hari: int = None
+):
+    now = datetime.utcnow().replace(tzinfo=timezone.utc)
+    
+    # Parsing waktu sesuai tipe
+    if tipe == "sekali":
+        try:
+            remind_time = datetime.fromisoformat(waktu)
+            if remind_time.tzinfo is None:
+                remind_time = remind_time.replace(tzinfo=timezone.utc)
+        except Exception:
+            await interaction.response.send_message("Format waktu untuk tipe 'sekali' harus ISO datetime. Contoh: 2025-05-26T15:30:00+00:00", ephemeral=True)
+            return
+        if remind_time <= now:
+            await interaction.response.send_message("Waktu reminder harus di masa depan.", ephemeral=True)
+            return
+    else:
+        # untuk harian dan mingguan, waktu format "HH:MM"
+        try:
+            hour, minute = map(int, waktu.split(":"))
+            remind_time = time(hour=hour, minute=minute)
+        except Exception:
+            await interaction.response.send_message("Format waktu harus HH:MM, contoh: 15:30", ephemeral=True)
+            return
+        
+        if tipe == "mingguan":
+            if hari is None or not (0 <= hari <= 6):
+                await interaction.response.send_message("Untuk tipe 'mingguan', parameter hari harus diisi 0-6 (0=Senin, ..., 6=Minggu).", ephemeral=True)
+                return
+    
+    # Simpan reminder ke list global role_reminders
+    role_reminders.append({
+        "tipe": tipe,
+        "waktu": remind_time,
+        "pesan": pesan,
+        "role": role,
+        "hari": hari,
+        "channel_id": interaction.channel.id,
+    })
+    
+    await interaction.response.send_message(f"Reminder berhasil disimpan! Role {role.mention} akan diingatkan sesuai jadwal.", ephemeral=True)
 @tree.command(name="userinfo", description="Tampilkan info pengguna", guild=discord.Object(id=GUILD_ID))
 @app_commands.describe(user="User yang ingin dilihat info-nya (opsional)")
 async def userinfo(interaction: discord.Interaction, user: discord.Member = None):
@@ -423,21 +481,26 @@ async def public_reminder_task():
                     pass
 
 
-# ======= CLOSE INACTIVE TICKETS =======
+# ======= CLOSE INACTIVE TICKETS =======#
 @tasks.loop(minutes=30)
 async def close_inactive_tickets():
     now = datetime.utcnow()
     to_close = []
     for channel_id, last_active in inactive_tickets.items():
-        if (now - last_active).total_seconds() > 900:  # 15 menit
+        elapsed = (now - last_active).total_seconds()
+        if elapsed > 1800:  # 30 menit = 1800 detik
             to_close.append(channel_id)
+
+    guild = bot.get_guild(GUILD_ID)
     for channel_id in to_close:
-        channel = bot.get_channel(channel_id)
+        channel = guild.get_channel(channel_id)
         if channel:
             try:
+                await channel.send("Tiket ini sudah tidak aktif selama 30 menit dan akan ditutup otomatis.")
+                await asyncio.sleep(5)
                 await channel.delete()
-            except:
-                pass
+            except Exception as e:
+                print(f"Gagal menutup tiket {channel.name}: {e}")
         inactive_tickets.pop(channel_id, None)
 
 
