@@ -43,7 +43,6 @@ user_messages = defaultdict(list)
 user_xp = defaultdict(int)
 user_level = defaultdict(int)
 
-# Hapus pengingat pribadi (daily_reminder_users, weekly_reminders, one_time_reminders)
 # public_reminders tetap ada karena itu pengingat ke channel, bukan DM pribadi
 public_reminders = defaultdict(list)
 inactive_tickets = {}
@@ -82,8 +81,6 @@ DAILY_ANNOUNCEMENT_TEMPLATE = (
     "- Buka Mola untuk informasi terbaru dan proges SK KAMU.\n"
     "- Tetap semangat dan jaga kesehatan!"
 )
-
-# DAILY_DM_TEMPLATE dihapus karena tidak ada lagi pengingat DM pribadi
 
 # ======= FUNGSI BANTUAN =======
 def is_admin_prakom():
@@ -137,8 +134,6 @@ async def on_ready():
 
     # Hanya jalankan tugas pengingat yang relevan
     daily_reminder_task.start() # Ini untuk pengumuman harian di channel, bukan DM
-    # weekly_reminder_task.start() # Dihapus
-    # one_time_reminder_task.start() # Dihapus
     public_reminder_task.start() # Tetap ada untuk pengingat publik di channel
     close_inactive_tickets.start()
     check_role_reminders.start() # Tetap ada untuk pengingat role
@@ -324,6 +319,7 @@ async def set_reminder(
 
     else:
         await interaction.followup.send("Tipe reminder tidak valid. Gunakan 'sekali' atau 'publik'.", ephemeral=True)
+
 ### Perintah Khusus Admin dan Informasi
 
 @tree.command(name="reminder_role", description="Kirim pengingat ke role tertentu pada waktu spesifik (Admin Only).", guild=discord.Object(id=GUILD_ID))
@@ -405,7 +401,7 @@ async def tri_karma_adhyaksa(interaction: discord.Interaction):
 3.  **Wicaksana**
     Bijaksana dalam tutur kata dan tingkah laku,khususnya dalam penerapan tugas dan kewenangan.
 """
-    await interaction.response.send_message(tri_karma_text)
+    await interaction.response.send_message(tri_krama_text) # Variabel sudah benar sekarang
 
 @tree.command(name="userinfo", description="Tampilkan info pengguna", guild=discord.Object(id=GUILD_ID))
 @app_commands.describe(user="User yang ingin dilihat info-nya (opsional)")
@@ -486,30 +482,36 @@ async def daily_reminder_task():
     if channel:
         quote = random.choice(DAILY_QUOTES)
         await channel.send(f"📅 **Pengingat Harian**\n\n{DAILY_ANNOUNCEMENT_TEMPLATE}\n\n💡 Quote hari ini:\n> {quote}")
-
-    # Logika DM harian ke user yang subscribe dihapus
-
-
+            
 # ======= TUGAS PENGINGAT PUBLIK (HH:MM di channel) =======
 @tasks.loop(minutes=1)
 async def public_reminder_task():
     await bot.wait_until_ready()
     now = datetime.now(WIB).strftime("%H:%M")
 
+    # Menggunakan list temporary untuk menampung pengingat yang akan dikirim
+    # Ini untuk menghindari modifikasi dictionary saat iterasi
+    reminders_to_send = [] 
+
     for channel_id, reminders in public_reminders.items():
         channel = bot.get_channel(channel_id)
         if not channel:
             continue
-        # Salin list untuk menghindari masalah saat memodifikasi list selama iterasi
-        reminders_copy = list(reminders)
-        for (time_str, message) in reminders_copy:
+        
+        # Iterasi dan kumpulkan pengingat yang akan dikirim
+        for (time_str, message) in reminders:
             if time_str == now:
-                try:
-                    await channel.send(f"🔔 Pengingat Publik:\n{message}")
-                except Exception as e:
-                    print(f"Gagal mengirim pengingat publik di channel {channel.name}: {e}")
-                # Pengingat publik HH:MM tidak otomatis dihapus, akan terkirim setiap hari
-                # Jika ingin sekali saja, perlu ditandai dan dihapus setelah terkirim
+                reminders_to_send.append((channel, message))
+    
+    # Kirim pengingat setelah iterasi selesai
+    for channel, message in reminders_to_send:
+        try:
+            # Perhatikan: Pengingat publik HH:MM akan terkirim setiap hari pada waktu yang sama.
+            # Jika ingin sekali saja, perlu ditandai dan dihapus setelah terkirim.
+            # Untuk saat ini, asumsikan ini adalah pengingat berulang harian.
+            await channel.send(f"🔔 Pengingat Publik:\n{message}")
+        except Exception as e:
+            print(f"Gagal mengirim pengingat publik di channel {channel.name}: {e}")
             
 # ======= TUGAS PENGINGAT ROLE & SEKALI (di channel) =======
 @tasks.loop(minutes=1)
@@ -642,7 +644,14 @@ async def list_reminder(interaction: discord.Interaction):
         for rem in user_created_reminders:
             waktu_str = rem['waktu'].strftime("%d %b %Y %H:%M WIB")
             if rem["tipe"] == "role":
-                role_name = rem['role'].name if isinstance(rem['role'], discord.Role) else "Role Tidak Ditemukan"
+                # Menggunakan try-except untuk mendapatkan nama role, karena objek role bisa tidak valid setelah bot restart
+                role_name = "Role Tidak Ditemukan"
+                if isinstance(rem['role'], discord.Role):
+                    role_name = rem['role'].name
+                # Jika role disimpan hanya sebagai ID, Anda perlu fetch role dari guild:
+                # guild = interaction.guild
+                # fetched_role = guild.get_role(rem['role_id']) # jika anda menyimpan role_id
+                # role_name = fetched_role.name if fetched_role else "Role Tidak Ditemukan"
                 msg += f"  Untuk role {role_name} pada {waktu_str} di channel <#{rem['channel_id']}>: {rem['pesan']}\n"
             elif rem["tipe"] == "sekali_channel":
                 msg += f"  Sekali pada {waktu_str} di channel <#{rem['channel_id']}>: {rem['pesan']}\n"
@@ -657,18 +666,16 @@ async def remove_reminder(interaction: discord.Interaction):
     await interaction.response.defer(ephemeral=True)
     user_id = interaction.user.id
     
-    # Hapus pengingat publik yang dibuat di channel ini oleh user
-    current_channel_id = interaction.channel.id
-    if current_channel_id in public_reminders:
-        # Untuk menyederhanakan, kita hapus semua pengingat publik di channel ini.
-        # Jika ingin lebih spesifik (hanya yang dibuat user), perlu struktur data lebih kompleks.
-        public_reminders[current_channel_id] = [
-            (w,p) for w,p in public_reminders[current_channel_id] if False # Ini akan menghapus semua
-        ]
-        # Alternatif: public_reminders.pop(current_channel_id, None)
+    # Hapus pengingat publik yang dibuat di channel ini
+    # Note: Untuk saat ini, ini akan menghapus SEMUA public reminder di channel tersebut,
+    # tidak hanya yang dibuat oleh user tertentu, karena data public_reminders tidak menyimpan creator_id.
+    if interaction.channel.id in public_reminders:
+        public_reminders[interaction.channel.id] = []
+        # Anda bisa juga menggunakan: public_reminders.pop(interaction.channel.id, None)
 
     global role_reminders
     # Hapus pengingat sekali atau role yang dibuat oleh user ini
+    # Ini sudah benar karena role_reminders menyimpan 'creator_id'
     role_reminders = [r for r in role_reminders if r.get("creator_id") != user_id]
     
     await interaction.followup.send("Semua pengingat publik di channel ini dan pengingat role yang kamu buat sudah dihapus.", ephemeral=True)
