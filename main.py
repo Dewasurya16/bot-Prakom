@@ -393,17 +393,17 @@ Tegarlah sepanjang zaman..
 
 @tree.command(name="tri_karma_adhyaksa", description="Menampilkan Tri Karma Adhyaksa.", guild=discord.Object(id=GUILD_ID))
 async def tri_karma_adhyaksa(interaction: discord.Interaction):
-    tri_karma_text = """
-**TRI KARMA ADHYAKSA**
+    tri_krama_text = """
+**TRI KRAMA ADHYAKSA**
 
 1.  **Satya**
-    Kesetiaan yang tanpa batas terhadap Tuhan Yang Maha Esa, Negara dan Masyarakat.
+    Kesetiaan yang bersumber pada rasa jujur, baik terhadap Tuhan Yang Maha Esa, Diri pribadi dan keluarga maupun kepada sesama manusia.
 
-2.  **Adi**
-    Yakni kemampuan dan kemauan mencapai kesempurnaan dalam pelaksanaan tugas dan kewajiban serta senantiasa berpegang teguh pada kebenaran.
+2.  **Adhi**
+    Kesempurnaan dalam bertugas dan yang berunsur utama pemilikan rasa tanggung jawab terhadap tuhan yang maha esa, keluarga dan sesama manusia.
 
 3.  **Wicaksana**
-    Bijaksana dalam tutur kata dan tingkah laku, baik di dalam maupun di luar kedinasan.
+    Bijaksana dalam tutur kata dan tingkah laku,khususnya dalam penerapan tugas dan kewenangan.
 """
     await interaction.response.send_message(tri_karma_text)
 
