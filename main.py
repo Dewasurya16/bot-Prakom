@@ -3,7 +3,7 @@ import discord
 from discord.ext import commands, tasks
 import asyncio
 from collections import defaultdict
-from datetime import datetime, timezone, time # Import timezone dan time
+from datetime import datetime, timezone, time
 import random
 
 from discord import app_commands
@@ -39,11 +39,11 @@ tree = bot.tree
 user_messages = defaultdict(list)
 user_xp = defaultdict(int)
 user_level = defaultdict(int)
-personal_reminders = defaultdict(list)  # {user_id: [(remind_time, message), ...]}
+personal_reminders = defaultdict(list)
 daily_reminder_users = set()
-weekly_reminders = defaultdict(list)    # {user_id: [(weekday, time, message), ...]}
-one_time_reminders = defaultdict(list)  # {user_id: [(datetime, message), ...]}
-public_reminders = defaultdict(list)    # {channel_id: [(time, message), ...]}
+weekly_reminders = defaultdict(list)
+one_time_reminders = defaultdict(list)
+public_reminders = defaultdict(list)
 inactive_tickets = {}
 
 # Tempat menyimpan semua reminder ke role
@@ -295,13 +295,14 @@ async def set_reminder(
             return
         
         try:
+            # Saat ini, reminder role hanya mendukung format ISO datetime untuk sekali pakai
             if ":" in waktu and len(waktu.split(':')) == 2:
-                # Logika ini belum diimplementasikan untuk reminder role harian/mingguan
-                await interaction.followup.send("Untuk tipe 'role' dengan format waktu HH:MM, fitur harian/mingguan belum diimplementasikan. Mohon gunakan ISO datetime untuk reminder sekali.", ephemeral=True)
+                await interaction.followup.send("Untuk tipe 'role' dengan format waktu HH:MM, fitur harian/mingguan belum diimplementasikan. Mohon gunakan ISO datetime untuk reminder sekali (contoh: 2025-06-01T10:00:00+07:00).", ephemeral=True)
                 return
             else: # Asumsi ISO datetime
                 remind_time_obj = datetime.fromisoformat(waktu)
                 if remind_time_obj.tzinfo is None:
+                    # Default ke UTC jika tidak ada info zona waktu
                     remind_time_obj = remind_time_obj.replace(tzinfo=timezone.UTC)
                 if remind_time_obj <= now:
                     await interaction.followup.send("Waktu reminder harus di masa depan.", ephemeral=True)
@@ -309,10 +310,10 @@ async def set_reminder(
             
             role_reminders.append({
                 "tipe": tipe,
-                "waktu": remind_time_obj,
+                "waktu": remind_time_obj, # Akan berupa objek datetime
                 "pesan": pesan,
-                "role": role,
-                "hari": hari,
+                "role": role, # Objek discord.Role
+                "hari": hari, # Tetap simpan hari jika ada (untuk kemungkinan pengembangan di masa depan)
                 "channel_id": interaction.channel.id,
                 "creator_id": user_id
             })
@@ -366,7 +367,7 @@ async def set_reminder(
 @tree.command(name="userinfo", description="Tampilkan info pengguna", guild=discord.Object(id=GUILD_ID))
 @app_commands.describe(user="User yang ingin dilihat info-nya (opsional)")
 async def userinfo(interaction: discord.Interaction, user: discord.Member = None):
-    await interaction.response.defer(ephemeral=True) # Tambahkan baris ini
+    await interaction.response.defer(ephemeral=True)
     user = user or interaction.user
     roles = [role.name for role in user.roles if role.name != "@everyone"]
     embed = discord.Embed(title=f"Info User: {user}", color=discord.Color.blue())
@@ -377,7 +378,7 @@ async def userinfo(interaction: discord.Interaction, user: discord.Member = None
     embed.add_field(name="Akun dibuat pada", value=user.created_at.strftime("%d %b %Y %H:%M UTC"), inline=False)
     embed.add_field(name="Gabung server pada", value=user.joined_at.strftime("%d %b %Y %H:%M UTC") if user.joined_at else "Tidak diketahui", inline=False)
     embed.add_field(name=f"Roles ({len(roles)})", value=", ".join(roles) if roles else "Tidak ada", inline=False)
-    await interaction.followup.send(embed=embed, ephemeral=True) # Ganti ini
+    await interaction.followup.send(embed=embed, ephemeral=True)
 
 @tree.command(name="clear", description="Hapus pesan dalam jumlah tertentu", guild=discord.Object(id=GUILD_ID))
 @app_commands.describe(jumlah="Jumlah pesan yang ingin dihapus (maks 100)")
@@ -392,25 +393,25 @@ async def clear(interaction: discord.Interaction, jumlah: int):
 
 @tree.command(name="ping", description="Cek respons bot", guild=discord.Object(id=GUILD_ID))
 async def ping(interaction: discord.Interaction):
-    await interaction.response.defer(ephemeral=True) # Tambahkan baris ini
-    await interaction.followup.send(f"Pong! Latensi: {round(bot.latency * 1000)} ms") # Ganti ini
+    await interaction.response.defer(ephemeral=True)
+    await interaction.followup.send(f"Pong! Latensi: {round(bot.latency * 1000)} ms")
 
 
 @tree.command(name="buat_tiket", description="Buat channel tiket bantuan", guild=discord.Object(id=GUILD_ID))
 async def buat_tiket(interaction: discord.Interaction):
-    await interaction.response.defer(ephemeral=True) # Tambahkan baris ini
+    await interaction.response.defer(ephemeral=True)
     channel, error = await create_ticket_channel(interaction.guild, interaction.user)
     if error:
-        await interaction.followup.send(error, ephemeral=True) # Ganti ini
+        await interaction.followup.send(error, ephemeral=True)
     else:
-        await interaction.followup.send(f"Channel tiket dibuat: {channel.mention}", ephemeral=True) # Ganti ini
+        await interaction.followup.send(f"Channel tiket dibuat: {channel.mention}", ephemeral=True)
 
 
 @tree.command(name="tutup_tiket", description="Tutup channel tiket ini", guild=discord.Object(id=GUILD_ID))
 async def tutup_tiket(interaction: discord.Interaction):
     if interaction.channel.category and interaction.channel.category.name == TICKET_CATEGORY_NAME:
-        await interaction.response.defer(ephemeral=True) # Tambahkan baris ini
-        await interaction.followup.send("Tiket akan ditutup dalam 5 detik...", ephemeral=True) # Ganti ini
+        await interaction.response.defer(ephemeral=True)
+        await interaction.followup.send("Tiket akan ditutup dalam 5 detik...", ephemeral=True)
         await asyncio.sleep(5)
         try:
             await interaction.channel.delete()
@@ -423,11 +424,11 @@ async def tutup_tiket(interaction: discord.Interaction):
 @tree.command(name="pengumuman", description="Kirim pengumuman ke channel tertentu", guild=discord.Object(id=GUILD_ID))
 @is_admin_prakom()
 async def pengumuman(interaction: discord.Interaction, pesan: str):
-    await interaction.response.defer(ephemeral=True) # Tambahkan baris ini
+    await interaction.response.defer(ephemeral=True)
     channel = interaction.guild.get_channel(ANNOUNCEMENT_CHANNEL_ID)
     if channel:
         await channel.send(f"📢 Pengumuman dari Admin:\n\n{pesan}")
-    await interaction.followup.send("Pengumuman terkirim.", ephemeral=True) # Ganti ini
+    await interaction.followup.send("Pengumuman terkirim.", ephemeral=True)
 
 
 # ======= DAILY ANNOUNCEMENT TASK =======
@@ -533,8 +534,10 @@ async def check_role_reminders():
     to_remove_role_reminders = []
 
     for reminder in role_reminders:
+        # Hanya proses reminder dengan tipe 'role'
         if reminder["tipe"] == "role":
             remind_time = reminder["waktu"]
+            # Asumsi reminder role adalah satu kali dengan ISO datetime
             if isinstance(remind_time, datetime) and remind_time <= now:
                 channel = bot.get_channel(reminder["channel_id"])
                 role = reminder["role"]
@@ -546,8 +549,11 @@ async def check_role_reminders():
                         print(f"Gagal mengirim reminder role: {e}")
                 to_remove_role_reminders.append(reminder)
     
+    # Hapus reminder setelah dikirim
     for rem in to_remove_role_reminders:
-        role_reminders[:] = [r for r in role_reminders if r != rem]
+        # Menggunakan list comprehension untuk membangun list baru tanpa elemen yang dihapus
+        global role_reminders # Pastikan kita memodifikasi variabel global
+        role_reminders = [r for r in role_reminders if r != rem]
 
 # ======= CLOSE INACTIVE TICKETS =======#
 @tasks.loop(minutes=30)
@@ -591,7 +597,7 @@ async def poll(
     option4: str = None,
     option5: str = None
 ):
-    await interaction.response.defer(ephemeral=True) # Tambahkan baris ini
+    await interaction.response.defer(ephemeral=True)
     options = [option1, option2]
     if option3:
         options.append(option3)
@@ -612,13 +618,13 @@ async def poll(
     for i in range(len(options)):
         await message.add_reaction(reactions[i])
 
-    await interaction.followup.send("Polling berhasil dibuat!", ephemeral=True) # Ganti ini
+    await interaction.followup.send("Polling berhasil dibuat!", ephemeral=True)
 
 # ======= REMINDER COMMANDS (UPDATED) =======
 
 @tree.command(name="list_reminder", description="Lihat daftar reminder kamu", guild=discord.Object(id=GUILD_ID))
 async def list_reminder(interaction: discord.Interaction):
-    await interaction.response.defer(ephemeral=True) # Tambahkan baris ini
+    await interaction.response.defer(ephemeral=True)
     user_id = interaction.user.id
     msg = ""
 
@@ -649,17 +655,20 @@ async def list_reminder(interaction: discord.Interaction):
         msg += "- Reminder Role yang kamu buat:\n"
         for rem in user_role_reminders:
             # Periksa apakah 'waktu' adalah objek datetime atau time
+            # reminder role saat ini hanya datetime, tapi ini aman untuk masa depan
             waktu_str = rem['waktu'].isoformat() if isinstance(rem['waktu'], datetime) else rem['waktu'].strftime("%H:%M")
-            msg += f"  Untuk role {rem['role'].name} pada {waktu_str} di channel <#{rem['channel_id']}>: {rem['pesan']}\n"
+            # Pastikan role objek masih valid, jika tidak, tampilkan nama role
+            role_name = rem['role'].name if isinstance(rem['role'], discord.Role) else "Role Tidak Ditemukan"
+            msg += f"  Untuk role {role_name} pada {waktu_str} di channel <#{rem['channel_id']}>: {rem['pesan']}\n"
     else:
         msg += "- Reminder Role yang kamu buat: Tidak ada\n"
 
-    await interaction.followup.send(msg, ephemeral=True) # Ganti ini
+    await interaction.followup.send(msg, ephemeral=True)
 
 
-@tree.command(name="remove_reminder", description="Hapus semua reminder pribadi kamu (harian, mingguan, sekali)", guild=discord.Object(id=GUILD_ID))
+@tree.command(name="remove_reminder", description="Hapus semua reminder pribadi kamu (harian, mingguan, sekali) dan reminder role yang kamu buat", guild=discord.Object(id=GUILD_ID))
 async def remove_reminder(interaction: discord.Interaction):
-    await interaction.response.defer(ephemeral=True) # Tambahkan baris ini
+    await interaction.response.defer(ephemeral=True)
     user_id = interaction.user.id
     daily_reminder_users.discard(user_id)
     weekly_reminders.pop(user_id, None)
@@ -667,10 +676,10 @@ async def remove_reminder(interaction: discord.Interaction):
     
     # Hapus reminder role yang dibuat oleh user ini
     # Gunakan list comprehension untuk membangun list baru tanpa reminder yang dihapus
-    global role_reminders
+    global role_reminders # Pastikan kita memodifikasi variabel global
     role_reminders = [r for r in role_reminders if r.get("creator_id") != user_id]
     
-    await interaction.followup.send("Semua reminder pribadi kamu sudah dihapus. Reminder role yang kamu buat juga telah dihapus.", ephemeral=True) # Ganti ini
+    await interaction.followup.send("Semua reminder pribadi kamu sudah dihapus. Reminder role yang kamu buat juga telah dihapus.", ephemeral=True)
 
 
 # ======= RUN BOT =======
