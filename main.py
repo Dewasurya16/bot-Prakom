@@ -477,7 +477,6 @@ async def tutup_tiket(interaction: discord.Interaction):
     else:
         await interaction.response.send_message("Command ini hanya bisa dipakai di channel tiket.", ephemeral=True)
 
----
 ### Command Pengumuman Admin
 
 @tree.command(name="pengumuman", description="Kirim pengumuman ke channel tertentu", guild=discord.Object(id=GUILD_ID))
@@ -489,7 +488,6 @@ async def pengumuman(interaction: discord.Interaction, pesan: str):
         await channel.send(f"📢 Pengumuman dari Admin:\n\n{pesan}")
     await interaction.followup.send("Pengumuman terkirim.", ephemeral=True)
 
----
 ### Tugas Berulang Otomatis
 
 # ======= TUGAS PENGINGAT HARIAN (untuk channel umum) =======
@@ -570,7 +568,6 @@ async def check_role_reminders():
     # Hapus pengingat yang sudah dikirim
     role_reminders = [r for r in role_reminders if r not in to_remove_reminders]
 
----
 ### Penutupan Tiket Otomatis
 
 @tasks.loop(minutes=30)
@@ -599,7 +596,7 @@ async def close_inactive_tickets():
                 print(f"Gagal menutup tiket {channel.name}: {e}")
         inactive_tickets.pop(channel_id, None)
 
----
+
 ### Sistem Polling
 
 @tree.command(name="poll", description="Buat polling dengan beberapa opsi", guild=discord.Object(id=GUILD_ID))
@@ -643,7 +640,7 @@ async def poll(
 
     await interaction.followup.send("Polling berhasil dibuat!", ephemeral=True)
 
----
+
 ### Manajemen Pengingat (DIPERBARUI)
 
 @tree.command(name="list_reminder", description="Lihat daftar reminder yang kamu buat (publik dan role)", guild=discord.Object(id=GUILD_ID))
