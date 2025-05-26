@@ -452,7 +452,6 @@ async def ping(interaction: discord.Interaction):
     await interaction.response.defer(ephemeral=True)
     await interaction.followup.send(f"Pong! Latensi: {round(bot.latency * 1000)} ms")
 
----
 ### Command Manajemen Tiket
 
 @tree.command(name="buat_tiket", description="Buat channel tiket bantuan", guild=discord.Object(id=GUILD_ID))
