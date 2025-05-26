@@ -254,19 +254,36 @@ async def on_reaction_add(reaction, user):
         return
     if reaction.message.channel.id != GENDER_CHANNEL_ID:
         return
+
+    guild = reaction.message.guild
+    role_to_add = None
+    
     if reaction.emoji == "👩":
-        role = discord.utils.get(user.guild.roles, name="Prakom Cantik")
+        role_to_add = discord.utils.get(guild.roles, name="Prakom Cantik")
     elif reaction.emoji == "👨":
-        role = discord.utils.get(user.guild.roles, name="Prakom Ganteng")
+        role_to_add = discord.utils.get(guild.roles, name="Prakom Ganteng")
     else:
+        # Jika emoji yang direaksikan bukan yang diharapkan, hentikan proses
         return
 
-    if role:
+    if role_to_add:
         try:
-            await user.add_roles(role)
-            await reaction.message.channel.send(f"{user.mention} sudah memilih {role.name}")
-        except:
-            pass
+            # Tambahkan role baru
+            await user.add_roles(role_to_add)
+            await reaction.message.channel.send(f"{user.mention} sudah memilih {role_to_add.name}")
+
+            # Hapus role 'Anggota' jika ada
+            role_anggota = discord.utils.get(guild.roles, name="Anggota")
+            if role_anggota and role_anggota in user.roles:
+                await user.remove_roles(role_anggota)
+                print(f"Role 'Anggota' dihapus dari {user.display_name}")
+
+        except discord.Forbidden:
+            print(f"Bot tidak memiliki izin untuk mengelola role untuk {user}.")
+            await reaction.message.channel.send(f"❌ Saya tidak memiliki izin untuk mengatur role.")
+        except Exception as e:
+            print(f"Terjadi kesalahan saat mengatur role untuk {user}: {e}")
+            await reaction.message.channel.send(f"❌ Terjadi kesalahan saat mengatur role Anda.")
 
 
 # ======= PERINTAH =======
@@ -320,6 +337,7 @@ async def set_reminder(
     else:
         await interaction.followup.send("Tipe reminder tidak valid. Gunakan 'sekali' atau 'publik'.", ephemeral=True)
 
+---
 ### Perintah Khusus Admin dan Informasi
 
 @tree.command(name="reminder_role", description="Kirim pengingat ke role tertentu pada waktu spesifik (Admin Only).", guild=discord.Object(id=GUILD_ID))
@@ -435,6 +453,8 @@ async def ping(interaction: discord.Interaction):
     await interaction.response.defer(ephemeral=True)
     await interaction.followup.send(f"Pong! Latensi: {round(bot.latency * 1000)} ms")
 
+---
+### Command Manajemen Tiket
 
 @tree.command(name="buat_tiket", description="Buat channel tiket bantuan", guild=discord.Object(id=GUILD_ID))
 async def buat_tiket(interaction: discord.Interaction):
@@ -459,6 +479,8 @@ async def tutup_tiket(interaction: discord.Interaction):
     else:
         await interaction.response.send_message("Command ini hanya bisa dipakai di channel tiket.", ephemeral=True)
 
+---
+### Command Pengumuman Admin
 
 @tree.command(name="pengumuman", description="Kirim pengumuman ke channel tertentu", guild=discord.Object(id=GUILD_ID))
 @is_admin_prakom()
@@ -469,6 +491,8 @@ async def pengumuman(interaction: discord.Interaction, pesan: str):
         await channel.send(f"📢 Pengumuman dari Admin:\n\n{pesan}")
     await interaction.followup.send("Pengumuman terkirim.", ephemeral=True)
 
+---
+### Tugas Berulang Otomatis
 
 # ======= TUGAS PENGINGAT HARIAN (untuk channel umum) =======
 @tasks.loop(hours=24)
@@ -482,7 +506,7 @@ async def daily_reminder_task():
     if channel:
         quote = random.choice(DAILY_QUOTES)
         await channel.send(f"📅 **Pengingat Harian**\n\n{DAILY_ANNOUNCEMENT_TEMPLATE}\n\n💡 Quote hari ini:\n> {quote}")
-            
+             
 # ======= TUGAS PENGINGAT PUBLIK (HH:MM di channel) =======
 @tasks.loop(minutes=1)
 async def public_reminder_task():
@@ -548,7 +572,9 @@ async def check_role_reminders():
     # Hapus pengingat yang sudah dikirim
     role_reminders = [r for r in role_reminders if r not in to_remove_reminders]
 
-# ======= TUTUP TIKET TIDAK AKTIF =======
+---
+### Penutupan Tiket Otomatis
+
 @tasks.loop(minutes=30)
 async def close_inactive_tickets():
     await bot.wait_until_ready()
@@ -575,8 +601,9 @@ async def close_inactive_tickets():
                 print(f"Gagal menutup tiket {channel.name}: {e}")
         inactive_tickets.pop(channel_id, None)
 
+---
+### Sistem Polling
 
-# ======= SISTEM POLLING =======
 @tree.command(name="poll", description="Buat polling dengan beberapa opsi", guild=discord.Object(id=GUILD_ID))
 @app_commands.describe(
     question="Pertanyaan polling",
@@ -618,7 +645,8 @@ async def poll(
 
     await interaction.followup.send("Polling berhasil dibuat!", ephemeral=True)
 
-# ======= PERINTAH PENGINGAT (DIPERBARUI) =======
+---
+### Manajemen Pengingat (DIPERBARUI)
 
 @tree.command(name="list_reminder", description="Lihat daftar reminder yang kamu buat (publik dan role)", guild=discord.Object(id=GUILD_ID))
 async def list_reminder(interaction: discord.Interaction):
