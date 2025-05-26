@@ -454,7 +454,7 @@ async def daily_reminder_task():
         personal_reminders[user_id] = new_list
 
     # Kirim pengingat harian pukul 00:00 UTC
-    if now.hour == 0 and now.minute == 0:
+    if now.hour == 10 and now.minute == 0:
         for user_id in daily_reminder_users:
             user = bot.get_user(user_id)
             if user:
