@@ -283,7 +283,7 @@ async def set_reminder(
     role: discord.Role = None, # Jadikan opsional
     hari: int = None
 ):
-    await interaction.response.defer(ephemeral=True) # Tambahkan baris ini
+    await interaction.response.defer(ephemeral=True)
     now = datetime.now(timezone.UTC)
     tipe = tipe.lower()
     user_id = interaction.user.id
@@ -530,6 +530,8 @@ async def public_reminder_task():
 @tasks.loop(minutes=1)
 async def check_role_reminders():
     await bot.wait_until_ready()
+    # Pindahkan deklarasi global ke awal fungsi
+    global role_reminders
     now = datetime.now(timezone.UTC)
     to_remove_role_reminders = []
 
@@ -552,7 +554,6 @@ async def check_role_reminders():
     # Hapus reminder setelah dikirim
     for rem in to_remove_role_reminders:
         # Menggunakan list comprehension untuk membangun list baru tanpa elemen yang dihapus
-        global role_reminders # Pastikan kita memodifikasi variabel global
         role_reminders = [r for r in role_reminders if r != rem]
 
 # ======= CLOSE INACTIVE TICKETS =======#
@@ -675,8 +676,9 @@ async def remove_reminder(interaction: discord.Interaction):
     one_time_reminders.pop(user_id, None)
     
     # Hapus reminder role yang dibuat oleh user ini
+    # Pindahkan deklarasi global ke awal fungsi
+    global role_reminders
     # Gunakan list comprehension untuk membangun list baru tanpa reminder yang dihapus
-    global role_reminders # Pastikan kita memodifikasi variabel global
     role_reminders = [r for r in role_reminders if r.get("creator_id") != user_id]
     
     await interaction.followup.send("Semua reminder pribadi kamu sudah dihapus. Reminder role yang kamu buat juga telah dihapus.", ephemeral=True)
