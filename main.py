@@ -492,7 +492,7 @@ async def on_interaction(interaction):
 
 
 # ======= JALANKAN BOT =======
-TOKEN = os.getenv("DISCORD_BOT_TOKEN")
+TOKEN = os.getenv("DISCORD_TOKEN")
 if not TOKEN:
     print("Error: Token bot belum diset di environment variable DISCORD_BOT_TOKEN.")
 else:
