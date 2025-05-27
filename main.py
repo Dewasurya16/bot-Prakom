@@ -613,8 +613,8 @@ async def public_reminder_task():
                         await channel.send(f"🔔 **Pengingat Publik:** {message}")
                     except discord.Forbidden:
                         print(f"Bot tidak memiliki izin kirim pesan di channel {channel.name} untuk pengingat publik.")
-                # Jika Anda ingin reminder publik berulang setiap hari, jangan hapus di sini.
-                # Jika hanya ingin sekali, Anda bisa menambahkan logika penghapusan.
+                    # Jika Anda ingin reminder publik berulang setiap hari, jangan hapus di sini.
+                    # Jika hanya ingin sekali, Anda bisa menambahkan logika penghapusan.
 
 @tasks.loop(minutes=1)
 async def check_private_reminders():
@@ -632,8 +632,8 @@ async def check_private_reminders():
                     except discord.Forbidden:
                         print(f"Gagal mengirim DM ke {user.name} ({user_id_str}) untuk pengingat pribadi.")
                     reminders.remove(rem) # Hapus setelah terkirim
-        if not reminders:
-            reminders_to_remove_private.append(user_id_str)
+            if not reminders:
+                reminders_to_remove_private.append(user_id_str)
 
     for user_id_str in reminders_to_remove_private:
         del private_reminders_data[user_id_str]
@@ -662,6 +662,17 @@ async def check_role_reminders(): # Menggabungkan scheduled_announcement dan sek
                     except discord.Forbidden:
                         print(f"Gagal mengirim pengumuman terjadwal ke channel {channel.name}.")
                 reminders_to_remove_role.append(i)
+            elif rem.get("tipe") == "role": # Logika untuk pengingat role
+                guild = bot.get_guild(GUILD_ID)
+                if guild:
+                    role_target = discord.utils.get(guild.roles, name=rem["role_name"])
+                    channel = bot.get_channel(rem["channel_id"])
+                    if role_target and channel:
+                        try:
+                            await channel.send(f"🔔 **Pengingat untuk {role_target.mention}:** {rem['pesan']}")
+                        except discord.Forbidden:
+                            print(f"Gagal mengirim pengingat ke channel {channel.name} untuk role {role_target.name}.")
+                reminders_to_remove_role.append(i)
 
     # Hapus reminder secara terbalik untuk menghindari masalah indeks
     for i in sorted(reminders_to_remove_role, reverse=True):
@@ -685,19 +696,21 @@ async def daily_reminder_task():
 
 # ======= SLASH COMMANDS =======
 
-## Perintah Umum
-
-@tree.command(name="set_reminder", description="Set reminder: publik (HH:MM) atau sekali (YYYY-MM-DDTHH:MM)", guild=discord.Object(id=GUILD_ID))
+@tree.command(name="set_reminder", description="Set reminder: pribadi (DM), publik (channel), sekali (channel), atau role (channel)", guild=discord.Object(id=GUILD_ID))
 @app_commands.describe(
-    tipe="Tipe reminder: publik atau sekali",
-    waktu="Waktu pengingat. Format HH:MM untuk publik, YYYY-MM-DDTHH:MM untuk sekali",
-    pesan="Pesan yang akan dikirim"
+    tipe="Tipe reminder: pribadi, publik, sekali, atau role",
+    waktu="Waktu pengingat. Format HH:MM untuk publik, YYYY-MM-DDTHH:MM untuk pribadi/sekali/role",
+    pesan="Pesan yang akan dikirim",
+    target_role="Nama role jika tipe adalah 'role' (opsional)",
+    target_user="Pengguna jika tipe adalah 'pribadi' (opsional, gunakan @mention atau ID)"
 )
 async def set_reminder(
     interaction: discord.Interaction,
     tipe: str,
     waktu: str,
-    pesan: str
+    pesan: str,
+    target_role: str = None,
+    target_user: discord.Member = None
 ):
     await interaction.response.defer(ephemeral=True)
     now = datetime.now(WIB)
@@ -712,7 +725,6 @@ async def set_reminder(
                 await interaction.followup.send("Waktu reminder harus di masa depan.", ephemeral=True)
                 return
 
-            # Menggunakan role_reminders untuk menyimpan reminder sekali_channel
             role_reminders.append({
                 "tipe": "sekali_channel",
                 "waktu": dt,
@@ -728,356 +740,481 @@ async def set_reminder(
     elif tipe == "publik":
         channel = interaction.channel
         try:
-            # Hanya validasi format waktu, tidak perlu dibandingkan dengan now
-            datetime.strptime(waktu, "%H:%M")
+            datetime.strptime(waktu, "%H:%M") # Hanya validasi format waktu
             public_reminders[channel.id].append((waktu, pesan))
             await interaction.followup.send(f"✅ Reminder publik set di channel ini pada jam **{waktu} WIB**.", ephemeral=True)
         except ValueError:
             await interaction.followup.send("❌ Format waktu publik harus HH:MM (24 jam, contoh: 14:30).", ephemeral=True)
 
+    elif tipe == "pribadi":
+        if not target_user:
+            await interaction.followup.send("❌ Untuk pengingat pribadi, kamu harus menyebutkan pengguna yang dituju (`target_user`).", ephemeral=True)
+            return
+
+        try:
+            dt = datetime.fromisoformat(waktu)
+            dt = dt.replace(tzinfo=WIB)
+
+            if dt < now:
+                await interaction.followup.send("Waktu reminder harus di masa depan.", ephemeral=True)
+                return
+
+            user_id_str = str(target_user.id)
+            if user_id_str not in private_reminders_data:
+                private_reminders_data[user_id_str] = []
+            private_reminders_data[user_id_str].append({"time": dt, "message": pesan})
+            save_private_reminders()
+            await interaction.followup.send(f"✅ Pengingat pribadi set untuk {target_user.mention} pada **{dt.strftime('%d %b %Y %H:%M WIB')}**.", ephemeral=True)
+        except ValueError:
+            await interaction.followup.send("❌ Format waktu pribadi harus YYYY-MM-DDTHH:MM (contoh: 2025-05-26T14:30).", ephemeral=True)
+
+    elif tipe == "role":
+        if not target_role:
+            await interaction.followup.send("❌ Untuk pengingat role, kamu harus menyebutkan nama role yang dituju (`target_role`).", ephemeral=True)
+            return
+
+        guild = interaction.guild
+        role_obj = discord.utils.get(guild.roles, name=target_role)
+
+        if not role_obj:
+            await interaction.followup.send(f"❌ Role '{target_role}' tidak ditemukan di server ini.", ephemeral=True)
+            return
+
+        try:
+            dt = datetime.fromisoformat(waktu)
+            dt = dt.replace(tzinfo=WIB)
+
+            if dt < now:
+                await interaction.followup.send("Waktu reminder harus di masa depan.", ephemeral=True)
+                return
+
+            role_reminders.append({
+                "tipe": "role",
+                "waktu": dt,
+                "pesan": pesan,
+                "channel_id": interaction.channel.id, # Pengingat role akan dikirim di channel ini
+                "role_name": target_role,
+                "creator_id": interaction.user.id
+            })
+            save_role_reminders()
+            await interaction.followup.send(f"✅ Pengingat untuk role **@{target_role}** set pada **{dt.strftime('%d %b %Y %H:%M WIB')}** di channel ini.", ephemeral=True)
+        except ValueError:
+            await interaction.followup.send("❌ Format waktu role harus YYYY-MM-DDTHH:MM (contoh: 2025-05-26T14:30).", ephemeral=True)
+
     else:
-        await interaction.followup.send("❌ Tipe reminder tidak valid. Gunakan 'sekali' atau 'publik'.", ephemeral=True)
-
-@tree.command(name="mars_adhyaksa", description="Menampilkan lirik Mars Adhyaksa.", guild=discord.Object(id=GUILD_ID))
-async def mars_adhyaksa(interaction: discord.Interaction):
-    mars_text = """
-**MARS ADHYAKSA**
-
-Satya Adi Wicaksana dasar Tripsila Adhyaksa
-Landasan jiwa Kejaksaan sebagai abdi masyarakat
-Setia dan sempurna
-Melaksanakan tugas kewajiban
-Tanggung jawab pada Tuhan,
-Keluarga dan sesama manusia
-
-Abdi negara sebagai penegak hukum
-Yang berlambangkan pedang nan sakti
-Insan Adhyaksa sebagai pedamba
-Keadilan dan perwujudan hukum pasti
-
-Kita basmi kemungkaran
-Kebatilan dan kejahatan yang
-Tersirat dan tersurat imbangan
-Tegarlah sepanjang zaman..
-"""
-    await interaction.response.send_message(mars_text)
-
-@tree.command(name="tri_karma_adhyaksa", description="Menampilkan Tri Karma Adhyaksa.", guild=discord.Object(id=GUILD_ID))
-async def tri_karma_adhyaksa(interaction: discord.Interaction):
-    tri_krama_text = """
-**TRI KRAMA ADHYAKSA**
-
-1.  **Satya**
-    Kesetiaan yang bersumber pada rasa jujur, baik terhadap Tuhan Yang Maha Esa, Diri pribadi dan keluarga maupun kepada sesama manusia.
-
-2.  **Adhi**
-    Kesempurnaan dalam bertugas dan yang berunsur utama pemilikan rasa tanggung jawab terhadap tuhan yang maha esa, keluarga dan sesama manusia.
-
-3.  **Wicaksana**
-    Bijaksana dalam tutur kata dan tingkah laku,khususnya dalam penerapan tugas dan kewenangan.
-"""
-    await interaction.response.send_message(tri_krama_text)
-
-@tree.command(name="userinfo", description="Tampilkan info pengguna", guild=discord.Object(id=GUILD_ID))
-@app_commands.describe(user="User yang ingin dilihat info-nya (opsional)")
-async def userinfo(interaction: discord.Interaction, user: discord.Member = None):
-    await interaction.response.defer(ephemeral=True)
-    user = user or interaction.user
-    roles = [role.name for role in user.roles if role.name != "@everyone"]
-    embed = discord.Embed(title=f"Info User: {user}", color=discord.Color.blue())
-    embed.set_thumbnail(url=user.display_avatar.url)
-    embed.add_field(name="ID", value=user.id, inline=True)
-    embed.add_field(name="Nama Lengkap", value=str(user), inline=True)
-    embed.add_field(name="Bot?", value=user.bot, inline=True)
-    embed.add_field(name="Akun dibuat pada", value=user.created_at.strftime("%d %b %Y %H:%M WIB"), inline=False)
-    embed.add_field(name="Gabung server pada", value=user.joined_at.strftime("%d %b %Y %H:%M WIB") if user.joined_at else "Tidak diketahui", inline=False)
-    embed.add_field(name=f"Roles ({len(roles)})", value=", ".join(roles) if roles else "Tidak ada", inline=False)
-    await interaction.followup.send(embed=embed, ephemeral=True)
-
-@tree.command(name="ping", description="Cek respons bot", guild=discord.Object(id=GUILD_ID))
-async def ping(interaction: discord.Interaction):
-    await interaction.response.defer(ephemeral=True)
-    await interaction.followup.send(f"Pong! Latensi: {round(bot.latency * 1000)} ms")
+        await interaction.followup.send("❌ Tipe reminder tidak valid. Gunakan 'pribadi', 'publik', 'sekali', atau 'role'.", ephemeral=True)
 
 
-## Perintah Moderasi (Admin Only)
+## Perintah Moderasi (Admin Prakom Only)
 
-@tree.command(name="clear", description="Hapus pesan dalam jumlah tertentu", guild=discord.Object(id=GUILD_ID))
-@app_commands.describe(jumlah="Jumlah pesan yang ingin dihapus (maks 100)")
-@is_admin_prakom()
-async def clear(interaction: discord.Interaction, jumlah: int):
-    if jumlah < 1 or jumlah > 100:
-        await interaction.response.send_message("❌ Jumlah harus antara 1 sampai 100.", ephemeral=True)
-        return
-    await interaction.response.defer(ephemeral=True)
-    deleted = await interaction.channel.purge(limit=jumlah)
-    await interaction.followup.send(f"✅ Berhasil menghapus {len(deleted)} pesan.", ephemeral=True)
-
-@tree.command(name="warn", description="Berikan peringatan kepada pengguna.", guild=discord.Object(id=GUILD_ID))
+---
+@tree.command(name="warn", description="Beri peringatan kepada anggota.", guild=discord.Object(id=GUILD_ID))
 @app_commands.describe(
     member="Anggota yang akan diberi peringatan",
     reason="Alasan peringatan"
 )
 @is_admin_prakom()
-async def warn(interaction: discord.Interaction, member: discord.Member, reason: str):
+async def warn(interaction: discord.Interaction, member: discord.Member, reason: str = "Tidak ada alasan"):
     await interaction.response.defer(ephemeral=True)
 
-    member_id_str = str(member.id)
-    if member_id_str not in warn_data:
-        warn_data[member_id_str] = []
-
-    warn_info = {
-        "moderator_id": interaction.user.id,
-        "moderator_name": str(interaction.user),
-        "reason": reason,
-        "timestamp": datetime.now(WIB).isoformat()
-    }
-    warn_data[member_id_str].append(warn_info)
+    member_id = str(member.id)
+    if member_id not in warn_data:
+        warn_data[member_id] = []
+    
+    warn_data[member_id].append({"reason": reason, "timestamp": datetime.now(WIB).isoformat(), "admin": interaction.user.id})
     save_warn_data()
 
-    log_channel = interaction.guild.get_channel(LOGADMIN_CHANNEL_ID)
-    if log_channel:
-        await log_channel.send(f"⚠️ **Peringatan:** {member.mention} telah diberi peringatan oleh {interaction.user.mention}. Alasan: **{reason}**")
-
+    await interaction.followup.send(f"✅ {member.mention} telah diberi peringatan karena: {reason}", ephemeral=False)
+    log_admin_channel = interaction.guild.get_channel(LOGADMIN_CHANNEL_ID)
+    if log_admin_channel:
+        await log_admin_channel.send(f"⚠️ **Peringatan:** {member.mention} diberi peringatan oleh {interaction.user.mention} karena: {reason}")
+    
     try:
-        await member.send(f"Anda telah diberi peringatan di **{interaction.guild.name}** dengan alasan: **{reason}**")
+        await member.send(f"Kamu telah diberi peringatan di server {interaction.guild.name} karena: {reason}. Mohon patuhi peraturan server.")
     except discord.Forbidden:
-        pass # DM tertutup
-
-    await interaction.followup.send(f"✅ {member.mention} berhasil diberi peringatan. Ini adalah peringatan ke-{len(warn_data[member_id_str])} nya.", ephemeral=True)
+        await interaction.followup.send(f"❗ Gagal mengirim DM peringatan ke {member.mention}. Mungkin DM mereka ditutup.", ephemeral=True)
 
 
-@tree.command(name="warnings", description="Lihat riwayat peringatan pengguna.", guild=discord.Object(id=GUILD_ID))
-@app_commands.describe(member="Anggota yang ingin dilihat riwayat peringatannya")
+---
+@tree.command(name="warnings", description="Lihat jumlah peringatan anggota.", guild=discord.Object(id=GUILD_ID))
+@app_commands.describe(member="Anggota yang ingin dilihat peringatannya")
 @is_admin_prakom()
 async def warnings(interaction: discord.Interaction, member: discord.Member):
     await interaction.response.defer(ephemeral=True)
 
-    member_id_str = str(member.id)
-    if member_id_str not in warn_data or not warn_data[member_id_str]:
-        await interaction.followup.send(f"❗ {member.mention} tidak memiliki riwayat peringatan.", ephemeral=True)
+    member_id = str(member.id)
+    if member_id not in warn_data or not warn_data[member_id]:
+        await interaction.followup.send(f"✅ {member.mention} tidak memiliki peringatan.", ephemeral=True)
         return
 
-    warnings_list = warn_data[member_id_str]
-    embed = discord.Embed(
-        title=f"Riwayat Peringatan untuk {member.display_name}",
-        color=discord.Color.orange()
-    )
-    embed.set_thumbnail(url=member.display_avatar.url)
-
-    for i, warn_info in enumerate(warnings_list):
-        timestamp_wib = datetime.fromisoformat(warn_info["timestamp"]).astimezone(WIB)
-        embed.add_field(
-            name=f"Peringatan #{i+1}",
-            value=(
-                f"**Oleh:** {warn_info['moderator_name']}\n"
-                f"**Alasan:** {warn_info['reason']}\n"
-                f"**Waktu:** {timestamp_wib.strftime('%d %b %Y %H:%M WIB')}"
-            ),
-            inline=False
-        )
-
+    warns = warn_data[member_id]
+    description = f"**Peringatan untuk {member.mention}:**\n"
+    for i, warn_info in enumerate(warns):
+        timestamp = datetime.fromisoformat(warn_info["timestamp"]).strftime('%Y-%m-%d %H:%M WIB')
+        admin = await bot.fetch_user(warn_info["admin"])
+        admin_name = admin.name if admin else "Admin tidak diketahui"
+        description += f"{i+1}. Alasan: `{warn_info['reason']}` pada {timestamp} oleh {admin_name}.\n"
+    
+    embed = discord.Embed(title="Daftar Peringatan", description=description, color=discord.Color.orange())
     await interaction.followup.send(embed=embed, ephemeral=True)
 
-@tree.command(name="clear_warnings", description="Hapus semua riwayat peringatan pengguna.", guild=discord.Object(id=GUILD_ID))
-@app_commands.describe(member="Anggota yang riwayat peringatannya akan dihapus")
+---
+@tree.command(name="clear_warnings", description="Hapus semua peringatan anggota.", guild=discord.Object(id=GUILD_ID))
+@app_commands.describe(member="Anggota yang ingin dihapus peringatannya")
 @is_admin_prakom()
 async def clear_warnings(interaction: discord.Interaction, member: discord.Member):
     await interaction.response.defer(ephemeral=True)
-    member_id_str = str(member.id)
-    if member_id_str in warn_data:
-        warn_data.pop(member_id_str)
-        save_warn_data()
-        log_channel = interaction.guild.get_channel(LOGADMIN_CHANNEL_ID)
-        if log_channel:
-            await log_channel.send(f"🧹 **Log Peringatan Dihapus:** Riwayat peringatan {member.mention} telah dihapus oleh {interaction.user.mention}.")
-        await interaction.followup.send(f"✅ Riwayat peringatan {member.mention} telah dihapus.", ephemeral=True)
-    else:
-        await interaction.followup.send(f"❗ {member.mention} tidak memiliki riwayat peringatan untuk dihapus.", ephemeral=True)
 
-@tree.command(name="kick", description="Keluarkan pengguna dari server.", guild=discord.Object(id=GUILD_ID))
+    member_id = str(member.id)
+    if member_id in warn_data:
+        del warn_data[member_id]
+        save_warn_data()
+        await interaction.followup.send(f"✅ Semua peringatan untuk {member.mention} telah dihapus.", ephemeral=True)
+        log_admin_channel = interaction.guild.get_channel(LOGADMIN_CHANNEL_ID)
+        if log_admin_channel:
+            await log_admin_channel.send(f"🧹 **Peringatan Dihapus:** Semua peringatan untuk {member.mention} telah dihapus oleh {interaction.user.mention}.")
+    else:
+        await interaction.followup.send(f"❗ {member.mention} tidak memiliki peringatan untuk dihapus.", ephemeral=True)
+
+---
+@tree.command(name="mute", description="Mute anggota untuk sementara.", guild=discord.Object(id=GUILD_ID))
+@app_commands.describe(
+    member="Anggota yang akan dimute",
+    duration_minutes="Durasi mute dalam menit",
+    reason="Alasan mute"
+)
+@is_admin_prakom()
+async def mute(interaction: discord.Interaction, member: discord.Member, duration_minutes: int, reason: str = "Tidak ada alasan"):
+    await interaction.response.defer(ephemeral=True)
+
+    guild = interaction.guild
+    mute_role = discord.utils.get(guild.roles, name=MUTE_ROLE_NAME)
+
+    if not mute_role:
+        try:
+            mute_role = await guild.create_role(name=MUTE_ROLE_NAME)
+            for channel in guild.channels:
+                await channel.set_permissions(mute_role, send_messages=False, speak=False)
+            await interaction.followup.send(f"✅ Role '{MUTE_ROLE_NAME}' dibuat dan izin disesuaikan.", ephemeral=True)
+        except discord.Forbidden:
+            await interaction.followup.send("❌ Bot tidak memiliki izin untuk membuat role atau mengatur izin channel.", ephemeral=True)
+            return
+
+    if mute_role in member.roles:
+        await interaction.followup.send(f"❗ {member.mention} sudah dimute.", ephemeral=True)
+        return
+
+    try:
+        await member.add_roles(mute_role, reason=reason)
+        await interaction.followup.send(f"✅ {member.mention} telah dimute selama {duration_minutes} menit karena: {reason}", ephemeral=False)
+        log_admin_channel = interaction.guild.get_channel(LOGADMIN_CHANNEL_ID)
+        if log_admin_channel:
+            await log_admin_channel.send(f"🔇 **Mute:** {member.mention} dimute oleh {interaction.user.mention} selama {duration_minutes} menit karena: {reason}.")
+        
+        await asyncio.sleep(duration_minutes * 60)
+        if mute_role in member.roles: # Pastikan masih dimute sebelum unmute
+            await member.remove_roles(mute_role)
+            await interaction.channel.send(f"✅ {member.mention} telah diunmute secara otomatis.", ephemeral=False)
+            if log_admin_channel:
+                await log_admin_channel.send(f"🔊 **Unmute Otomatis:** {member.mention} telah diunmute secara otomatis.")
+    except discord.Forbidden:
+        await interaction.followup.send("❌ Bot tidak memiliki izin untuk memute anggota.", ephemeral=True)
+    except Exception as e:
+        await interaction.followup.send(f"❌ Terjadi kesalahan saat memute: {e}", ephemeral=True)
+
+---
+@tree.command(name="unmute", description="Unmute anggota.", guild=discord.Object(id=GUILD_ID))
+@app_commands.describe(member="Anggota yang akan diunmute")
+@is_admin_prakom()
+async def unmute(interaction: discord.Interaction, member: discord.Member):
+    await interaction.response.defer(ephemeral=True)
+
+    guild = interaction.guild
+    mute_role = discord.utils.get(guild.roles, name=MUTE_ROLE_NAME)
+
+    if not mute_role or mute_role not in member.roles:
+        await interaction.followup.send(f"❗ {member.mention} tidak dalam keadaan mute.", ephemeral=True)
+        return
+
+    try:
+        await member.remove_roles(mute_role)
+        await interaction.followup.send(f"✅ {member.mention} telah diunmute.", ephemeral=False)
+        log_admin_channel = interaction.guild.get_channel(LOGADMIN_CHANNEL_ID)
+        if log_admin_channel:
+            await log_admin_channel.send(f"🔊 **Unmute Manual:** {member.mention} telah diunmute oleh {interaction.user.mention}.")
+    except discord.Forbidden:
+        await interaction.followup.send("❌ Bot tidak memiliki izin untuk mengunmute anggota.", ephemeral=True)
+    except Exception as e:
+        await interaction.followup.send(f"❌ Terjadi kesalahan saat mengunmute: {e}", ephemeral=True)
+
+---
+@tree.command(name="kick", description="Keluarkan anggota dari server.", guild=discord.Object(id=GUILD_ID))
 @app_commands.describe(
     member="Anggota yang akan dikeluarkan",
-    reason="Alasan kick"
+    reason="Alasan pengeluaran"
 )
 @is_admin_prakom()
 async def kick(interaction: discord.Interaction, member: discord.Member, reason: str = "Tidak ada alasan"):
     await interaction.response.defer(ephemeral=True)
 
-    if member.id == interaction.user.id:
-        await interaction.followup.send("❌ Kamu tidak bisa mengeluarkan diri sendiri.", ephemeral=True)
+    if member.id == bot.user.id:
+        await interaction.followup.send("❌ Saya tidak bisa mengeluarkan diri sendiri!", ephemeral=True)
         return
-    if member.top_role.position >= interaction.user.top_role.position:
-        await interaction.followup.send("❌ Kamu tidak bisa mengeluarkan anggota dengan role yang sama atau lebih tinggi.", ephemeral=True)
+    if member.id == interaction.user.id:
+        await interaction.followup.send("❌ Kamu tidak bisa mengeluarkan diri sendiri!", ephemeral=True)
+        return
+    if member.top_role >= interaction.user.top_role and interaction.user.id != interaction.guild.owner_id:
+        await interaction.followup.send("❌ Kamu tidak bisa mengeluarkan anggota dengan role yang sama atau lebih tinggi darimu.", ephemeral=True)
+        return
+    if member.top_role >= interaction.guild.me.top_role:
+        await interaction.followup.send("❌ Saya tidak bisa mengeluarkan anggota dengan role yang sama atau lebih tinggi dari saya.", ephemeral=True)
         return
 
     try:
         await member.kick(reason=reason)
-        log_channel = interaction.guild.get_channel(LOGADMIN_CHANNEL_ID)
-        if log_channel:
-            await log_channel.send(f"👢 **Kick:** {member.mention} telah dikeluarkan oleh {interaction.user.mention}. Alasan: **{reason}**")
-        await interaction.followup.send(f"✅ {member.mention} berhasil dikeluarkan. Alasan: {reason}", ephemeral=True)
+        await interaction.followup.send(f"✅ {member.mention} telah dikeluarkan karena: {reason}", ephemeral=False)
+        log_admin_channel = interaction.guild.get_channel(LOGADMIN_CHANNEL_ID)
+        if log_admin_channel:
+            await log_admin_channel.send(f"👢 **Kick:** {member.mention} dikeluarkan oleh {interaction.user.mention} karena: {reason}.")
     except discord.Forbidden:
-        await interaction.followup.send("❌ Saya tidak memiliki izin untuk mengeluarkan anggota ini.", ephemeral=True)
+        await interaction.followup.send("❌ Bot tidak memiliki izin untuk mengeluarkan anggota.", ephemeral=True)
     except Exception as e:
-        await interaction.followup.send(f"❌ Terjadi kesalahan: {e}", ephemeral=True)
+        await interaction.followup.send(f"❌ Terjadi kesalahan saat mengeluarkan: {e}", ephemeral=True)
 
-@tree.command(name="ban", description="Larangan pengguna dari server.", guild=discord.Object(id=GUILD_ID))
+---
+@tree.command(name="ban", description="Ban anggota dari server.", guild=discord.Object(id=GUILD_ID))
 @app_commands.describe(
-    member="Anggota yang akan dilarang",
+    member="Anggota yang akan diban",
     reason="Alasan ban"
 )
 @is_admin_prakom()
 async def ban(interaction: discord.Interaction, member: discord.Member, reason: str = "Tidak ada alasan"):
     await interaction.response.defer(ephemeral=True)
 
-    if member.id == interaction.user.id:
-        await interaction.followup.send("❌ Kamu tidak bisa melarang diri sendiri.", ephemeral=True)
+    if member.id == bot.user.id:
+        await interaction.followup.send("❌ Saya tidak bisa memban diri sendiri!", ephemeral=True)
         return
-    if member.top_role.position >= interaction.user.top_role.position:
-        await interaction.followup.send("❌ Kamu tidak bisa melarang anggota dengan role yang sama atau lebih tinggi.", ephemeral=True)
+    if member.id == interaction.user.id:
+        await interaction.followup.send("❌ Kamu tidak bisa memban diri sendiri!", ephemeral=True)
+        return
+    if member.top_role >= interaction.user.top_role and interaction.user.id != interaction.guild.owner_id:
+        await interaction.followup.send("❌ Kamu tidak bisa memban anggota dengan role yang sama atau lebih tinggi darimu.", ephemeral=True)
+        return
+    if member.top_role >= interaction.guild.me.top_role:
+        await interaction.followup.send("❌ Saya tidak bisa memban anggota dengan role yang sama atau lebih tinggi dari saya.", ephemeral=True)
         return
 
     try:
         await member.ban(reason=reason)
-        log_channel = interaction.guild.get_channel(LOGADMIN_CHANNEL_ID)
-        if log_channel:
-            await log_channel.send(f"🚫 **Ban:** {member.mention} telah dilarang oleh {interaction.user.mention}. Alasan: **{reason}**")
-        await interaction.followup.send(f"✅ {member.mention} berhasil dilarang. Alasan: {reason}", ephemeral=True)
+        await interaction.followup.send(f"✅ {member.mention} telah diban karena: {reason}", ephemeral=False)
+        log_admin_channel = interaction.guild.get_channel(LOGADMIN_CHANNEL_ID)
+        if log_admin_channel:
+            await log_admin_channel.send(f"🔨 **Ban:** {member.mention} diban oleh {interaction.user.mention} karena: {reason}.")
     except discord.Forbidden:
-        await interaction.followup.send("❌ Saya tidak memiliki izin untuk melarang anggota ini.", ephemeral=True)
+        await interaction.followup.send("❌ Bot tidak memiliki izin untuk memban anggota.", ephemeral=True)
     except Exception as e:
-        await interaction.followup.send(f"❌ Terjadi kesalahan: {e}", ephemeral=True)
+        await interaction.followup.send(f"❌ Terjadi kesalahan saat memban: {e}", ephemeral=True)
 
-@tree.command(name="unban", description="Batalkan larangan pengguna.", guild=discord.Object(id=GUILD_ID))
-@app_commands.describe(
-    user_id="ID pengguna yang akan dibatalkan larangannya",
-    reason="Alasan unban"
-)
+---
+@tree.command(name="unban", description="Unban anggota dari server.", guild=discord.Object(id=GUILD_ID))
+@app_commands.describe(user_id="ID pengguna yang akan diunban")
 @is_admin_prakom()
-async def unban(interaction: discord.Interaction, user_id: str, reason: str = "Tidak ada alasan"):
+async def unban(interaction: discord.Interaction, user_id: str):
     await interaction.response.defer(ephemeral=True)
 
     try:
-        user_id_int = int(user_id)
+        user = discord.Object(id=int(user_id))
+        await interaction.guild.unban(user)
+        await interaction.followup.send(f"✅ Pengguna dengan ID `{user_id}` telah diunban.", ephemeral=False)
+        log_admin_channel = interaction.guild.get_channel(LOGADMIN_CHANNEL_ID)
+        if log_admin_channel:
+            await log_admin_channel.send(f"🔓 **Unban:** Pengguna ID `{user_id}` diunban oleh {interaction.user.mention}.")
+    except discord.NotFound:
+        await interaction.followup.send(f"❗ Pengguna dengan ID `{user_id}` tidak ditemukan dalam daftar ban.", ephemeral=True)
+    except discord.Forbidden:
+        await interaction.followup.send("❌ Bot tidak memiliki izin untuk mengunban anggota.", ephemeral=True)
     except ValueError:
         await interaction.followup.send("❌ ID pengguna harus berupa angka.", ephemeral=True)
+    except Exception as e:
+        await interaction.followup.send(f"❌ Terjadi kesalahan saat mengunban: {e}", ephemeral=True)
+
+---
+@tree.command(name="clear", description="Hapus sejumlah pesan dari channel.", guild=discord.Object(id=GUILD_ID))
+@app_commands.describe(amount="Jumlah pesan yang akan dihapus (maks 100)")
+@is_admin_prakom()
+async def clear(interaction: discord.Interaction, amount: int):
+    await interaction.response.defer(ephemeral=True)
+
+    if amount <= 0 or amount > 100:
+        await interaction.followup.send("❌ Jumlah pesan yang dihapus harus antara 1 dan 100.", ephemeral=True)
         return
 
     try:
-        user = discord.Object(id=user_id_int)
-        await interaction.guild.unban(user, reason=reason)
-        log_channel = interaction.guild.get_channel(LOGADMIN_CHANNEL_ID)
-        if log_channel:
-            await log_channel.send(f"✅ **Unban:** Pengguna dengan ID `{user_id}` telah dibatalkan larangannya oleh {interaction.user.mention}. Alasan: **{reason}**")
-        await interaction.followup.send(f"✅ Pengguna dengan ID `{user_id}` berhasil dibatalkan larangannya. Alasan: {reason}", ephemeral=True)
-    except discord.NotFound:
-        await interaction.followup.send("❌ Pengguna dengan ID tersebut tidak ditemukan dalam daftar larangan.", ephemeral=True)
+        deleted = await interaction.channel.purge(limit=amount)
+        await interaction.followup.send(f"✅ Berhasil menghapus {len(deleted)} pesan.", ephemeral=True)
+        log_admin_channel = interaction.guild.get_channel(LOGADMIN_CHANNEL_ID)
+        if log_admin_channel:
+            await log_admin_channel.send(f"🗑️ **Pesan Dihapus:** {len(deleted)} pesan dihapus di {interaction.channel.mention} oleh {interaction.user.mention}.")
     except discord.Forbidden:
-        await interaction.followup.send("❌ Saya tidak memiliki izin untuk membatalkan larangan anggota ini.", ephemeral=True)
+        await interaction.followup.send("❌ Bot tidak memiliki izin untuk menghapus pesan di channel ini.", ephemeral=True)
     except Exception as e:
-        await interaction.followup.send(f"❌ Terjadi kesalahan: {e}", ephemeral=True)
+        await interaction.followup.send(f"❌ Terjadi kesalahan saat menghapus pesan: {e}", ephemeral=True)
 
-
-## Command Manajemen Tiket
-
-@tree.command(name="buat_tiket", description="Buat channel tiket bantuan", guild=discord.Object(id=GUILD_ID))
-async def buat_tiket(interaction: discord.Interaction):
+---
+@tree.command(name="add_role", description="Berikan role kepada anggota.", guild=discord.Object(id=GUILD_ID))
+@app_commands.describe(
+    member="Anggota yang akan diberi role",
+    role_name="Nama role yang akan diberikan"
+)
+@is_admin_prakom()
+async def add_role(interaction: discord.Interaction, member: discord.Member, role_name: str):
     await interaction.response.defer(ephemeral=True)
-    channel, error = await create_ticket_channel(interaction.guild, interaction.user)
-    if error:
-        await interaction.followup.send(error, ephemeral=True)
-    else:
-        view = TicketButtons(interaction.user, channel.id)
+
+    role = discord.utils.get(interaction.guild.roles, name=role_name)
+    if not role:
+        await interaction.followup.send(f"❌ Role `{role_name}` tidak ditemukan.", ephemeral=True)
+        return
+
+    if role in member.roles:
+        await interaction.followup.send(f"❗ {member.mention} sudah memiliki role `{role_name}`.", ephemeral=True)
+        return
+    
+    if role >= interaction.guild.me.top_role:
+        await interaction.followup.send("❌ Saya tidak bisa memberikan role yang sama atau lebih tinggi dari role saya.", ephemeral=True)
+        return
+
+    try:
+        await member.add_roles(role)
+        await interaction.followup.send(f"✅ Role `{role_name}` berhasil diberikan kepada {member.mention}.", ephemeral=False)
+        log_admin_channel = interaction.guild.get_channel(LOGADMIN_CHANNEL_ID)
+        if log_admin_channel:
+            await log_admin_channel.send(f"➕ **Role Diberikan:** Role `{role_name}` diberikan kepada {member.mention} oleh {interaction.user.mention}.")
+    except discord.Forbidden:
+        await interaction.followup.send("❌ Bot tidak memiliki izin untuk memberikan role ini.", ephemeral=True)
+    except Exception as e:
+        await interaction.followup.send(f"❌ Terjadi kesalahan saat memberikan role: {e}", ephemeral=True)
+
+---
+@tree.command(name="remove_role", description="Hapus role dari anggota.", guild=discord.Object(id=GUILD_ID))
+@app_commands.describe(
+    member="Anggota yang akan dihapus rolenya",
+    role_name="Nama role yang akan dihapus"
+)
+@is_admin_prakom()
+async def remove_role(interaction: discord.Interaction, member: discord.Member, role_name: str):
+    await interaction.response.defer(ephemeral=True)
+
+    role = discord.utils.get(interaction.guild.roles, name=role_name)
+    if not role:
+        await interaction.followup.send(f"❌ Role `{role_name}` tidak ditemukan.", ephemeral=True)
+        return
+
+    if role not in member.roles:
+        await interaction.followup.send(f"❗ {member.mention} tidak memiliki role `{role_name}`.", ephemeral=True)
+        return
+
+    try:
+        await member.remove_roles(role)
+        await interaction.followup.send(f"✅ Role `{role_name}` berhasil dihapus dari {member.mention}.", ephemeral=False)
+        log_admin_channel = interaction.guild.get_channel(LOGADMIN_CHANNEL_ID)
+        if log_admin_channel:
+            await log_admin_channel.send(f"➖ **Role Dihapus:** Role `{role_name}` dihapus dari {member.mention} oleh {interaction.user.mention}.")
+    except discord.Forbidden:
+        await interaction.followup.send("❌ Bot tidak memiliki izin untuk menghapus role ini.", ephemeral=True)
+    except Exception as e:
+        await interaction.followup.send(f"❌ Terjadi kesalahan saat menghapus role: {e}", ephemeral=True)
+
+---
+@tree.command(name="create_ticket", description="Buat tiket bantuan.", guild=discord.Object(id=GUILD_ID))
+async def create_ticket(interaction: discord.Interaction):
+    await interaction.response.defer(ephemeral=True)
+    
+    channel, error_message = await create_ticket_channel(interaction.guild, interaction.user)
+    
+    if channel:
         embed = discord.Embed(
-            title="Tiket Bantuan Baru",
-            description=f"Halo {interaction.user.mention}! Selamat datang di tiket bantuan Anda.\n\n"
+            title="Tiket Bantuan",
+            description=f"Halo {interaction.user.mention}! Tiket Anda telah dibuat.\n\n"
                         f"Seorang admin atau moderator akan segera membantu Anda.\n"
-                        f"Mohon jelaskan masalah atau pertanyaan Anda di sini.\n\n"
                         f"Gunakan tombol di bawah untuk mengelola tiket ini.",
             color=discord.Color.green()
         )
-        embed.set_footer(text="Terima kasih atas kesabaran Anda.")
-        try:
-            await channel.send(f"{interaction.user.mention}", embed=embed, view=view)
-        except discord.Forbidden:
-            await interaction.followup.send("❌ Channel tiket dibuat, tetapi bot tidak memiliki izin untuk mengirim pesan di sana. Pastikan izin diatur dengan benar.", ephemeral=True)
-            print(f"Bot tidak memiliki izin kirim pesan di tiket {channel.name}.")
-            # Lanjutkan dengan pesan sukses ke pengguna, karena channel tetap dibuat
-            await interaction.followup.send(f"✅ Channel tiket berhasil dibuat: {channel.mention}. Silakan jelaskan masalah Anda di sana.", ephemeral=True)
-            return
-
-        await interaction.followup.send(f"✅ Channel tiket berhasil dibuat: {channel.mention}", ephemeral=True)
-
+        view = TicketButtons(interaction.user, channel.id)
+        await channel.send(embed=embed, view=view)
+        await interaction.followup.send(f"✅ Tiket Anda telah dibuat: {channel.mention}", ephemeral=True)
+        
         log_admin_channel = interaction.guild.get_channel(LOGADMIN_CHANNEL_ID)
         if log_admin_channel:
-            await log_admin_channel.send(f"🆕 **Tiket Baru:** Tiket `{channel.name}` telah dibuat oleh {interaction.user.mention}. {channel.mention}")
-
-
-## Command Pengumuman Admin
-
-@tree.command(name="pengumuman", description="Kirim pengumuman ke channel tertentu", guild=discord.Object(id=GUILD_ID))
-@app_commands.describe(pesan="Pesan pengumuman")
-@is_admin_prakom()
-async def pengumuman(interaction: discord.Interaction, pesan: str):
-    await interaction.response.defer(ephemeral=True)
-    channel = interaction.guild.get_channel(ANNOUNCEMENT_CHANNEL_ID)
-    if channel:
-        try:
-            await channel.send(f"📢 Pengumuman dari Admin:\n\n{pesan}")
-            await interaction.followup.send("✅ Pengumuman terkirim.", ephemeral=True)
-        except discord.Forbidden:
-            await interaction.followup.send("❌ Saya tidak memiliki izin untuk mengirim pesan di channel pengumuman.", ephemeral=True)
+            await log_admin_channel.send(f"🆕 **Tiket Baru:** Tiket `{channel.name}` dibuat oleh {interaction.user.mention}.")
     else:
-        await interaction.followup.send("❌ Channel pengumuman tidak ditemukan. Pastikan ID channel diatur dengan benar.", ephemeral=True)
+        await interaction.followup.send(error_message, ephemeral=True)
 
-
-@tree.command(name="schedule_announcement", description="Jadwalkan pengumuman ke channel tertentu.", guild=discord.Object(id=GUILD_ID))
+---
+@tree.command(name="announcement", description="Kirim pengumuman ke channel yang ditentukan.", guild=discord.Object(id=GUILD_ID))
 @app_commands.describe(
-    channel="Channel untuk mengirim pengumuman",
-    waktu="Waktu pengumuman (format YYYY-MM-DDTHH:MM, akan dianggap WIB)",
-    pesan="Pesan pengumuman"
+    channel="Channel tempat pengumuman akan dikirim",
+    message="Pesan pengumuman"
 )
 @is_admin_prakom()
-async def schedule_announcement(
-    interaction: discord.Interaction,
-    channel: discord.TextChannel,
-    waktu: str,
-    pesan: str
-):
+async def announcement(interaction: discord.Interaction, channel: discord.TextChannel, message: str):
     await interaction.response.defer(ephemeral=True)
-    now = datetime.now(WIB)
-    user_id = interaction.user.id
 
     try:
-        announce_time_obj = datetime.fromisoformat(waktu)
-        announce_time_obj = announce_time_obj.replace(tzinfo=WIB)
+        embed = discord.Embed(
+            title="📢 PENGUMUMAN PENTING 📢",
+            description=message,
+            color=discord.Color.gold(),
+            timestamp=datetime.now(WIB)
+        )
+        embed.set_footer(text=f"Dari: {interaction.user.display_name}")
+        
+        await channel.send(embed=embed)
+        await interaction.followup.send(f"✅ Pengumuman berhasil dikirim ke {channel.mention}.", ephemeral=True)
+        log_admin_channel = interaction.guild.get_channel(LOGADMIN_CHANNEL_ID)
+        if log_admin_channel:
+            await log_admin_channel.send(f"📣 **Pengumuman Dikirim:** Pengumuman oleh {interaction.user.mention} dikirim ke {channel.mention}.")
+    except discord.Forbidden:
+        await interaction.followup.send("❌ Bot tidak memiliki izin untuk mengirim pesan di channel tersebut.", ephemeral=True)
+    except Exception as e:
+        await interaction.followup.send(f"❌ Terjadi kesalahan saat mengirim pengumuman: {e}", ephemeral=True)
 
-        if announce_time_obj <= now:
-            await interaction.followup.send("❌ Waktu pengumuman harus di masa depan (menggunakan WIB).", ephemeral=True)
+---
+@tree.command(name="scheduled_announcement", description="Jadwalkan pengumuman ke channel yang ditentukan.", guild=discord.Object(id=GUILD_ID))
+@app_commands.describe(
+    channel="Channel tempat pengumuman akan dikirim",
+    waktu="Waktu pengiriman pengumuman (YYYY-MM-DDTHH:MM)",
+    message="Pesan pengumuman"
+)
+@is_admin_prakom()
+async def scheduled_announcement(interaction: discord.Interaction, channel: discord.TextChannel, waktu: str, message: str):
+    await interaction.response.defer(ephemeral=True)
+    now = datetime.now(WIB)
+
+    try:
+        dt = datetime.fromisoformat(waktu)
+        dt = dt.replace(tzinfo=WIB)
+
+        if dt < now:
+            await interaction.followup.send("Waktu pengumuman terjadwal harus di masa depan.", ephemeral=True)
             return
 
         role_reminders.append({
             "tipe": "scheduled_announcement",
-            "waktu": announce_time_obj,
-            "pesan": pesan,
+            "waktu": dt,
+            "pesan": message,
             "channel_id": channel.id,
-            "creator_id": user_id
+            "creator_id": interaction.user.id
         })
         save_role_reminders()
 
-        await interaction.followup.send(f"✅ Pengumuman terjadwal berhasil disimpan untuk **{announce_time_obj.strftime('%d %b %Y %H:%M WIB')}** di {channel.mention}.", ephemeral=True)
+        await interaction.followup.send(f"✅ Pengumuman akan dikirim ke {channel.mention} pada **{dt.strftime('%d %b %Y %H:%M WIB')}**.", ephemeral=True)
+        log_admin_channel = interaction.guild.get_channel(LOGADMIN_CHANNEL_ID)
+        if log_admin_channel:
+            await log_admin_channel.send(f"🗓️ **Pengumuman Dijadwalkan:** Pengumuman oleh {interaction.user.mention} dijadwalkan ke {channel.mention} pada {dt.strftime('%d %b %Y %H:%M WIB')}.")
     except ValueError:
         await interaction.followup.send("❌ Format waktu harus YYYY-MM-DDTHH:MM (contoh: 2025-05-26T14:30).", ephemeral=True)
+    except Exception as e:
+        await interaction.followup.send(f"❌ Terjadi kesalahan saat menjadwalkan pengumuman: {e}", ephemeral=True)
 
-# ======= JALANKAN BOT =======
-if __name__ == "__main__":
-    # Mengambil token dari variabel lingkungan bernama DISCORD_TOKEN
-    TOKEN = os.getenv("DISCORD_TOKEN")
-
-    if not TOKEN:
-        print("❌ ERROR: Variabel lingkungan 'DISCORD_TOKEN' tidak ditemukan.")
-        print("Pastikan Anda telah mengatur variabel lingkungan DISCORD_TOKEN sebelum menjalankan bot.")
-        exit(1) # Keluar dari program jika token tidak ditemukan
-    else:
-        bot.run(TOKEN)
+# Contoh penggunaan TOKEN dari file .env
+bot.run(os.getenv("DISCORD_TOKEN"))
