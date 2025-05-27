@@ -316,6 +316,45 @@ class TicketButtons(View):
                 await interaction.message.edit(view=self)
         else:
             await interaction.response.send_message("❗ Data tiket ini tidak ditemukan, mungkin sudah ditutup.", ephemeral=True)
+@tree.command(name="mars_adhyaksa", description="Menampilkan lirik Mars Adhyaksa.", guild=discord.Object(id=GUILD_ID))
+async def mars_adhyaksa(interaction: discord.Interaction):
+    mars_text = """
+**MARS ADHYAKSA**
+
+Satya Adi Wicaksana dasar Tripsila Adhyaksa
+Landasan jiwa Kejaksaan sebagai abdi masyarakat
+Setia dan sempurna
+Melaksanakan tugas kewajiban
+Tanggung jawab pada Tuhan,
+Keluarga dan sesama manusia
+
+Abdi negara sebagai penegak hukum
+Yang berlambangkan pedang nan sakti
+Insan Adhyaksa sebagai pedamba
+Keadilan dan perwujudan hukum pasti
+
+Kita basmi kemungkaran
+Kebatilan dan kejahatan yang
+Tersirat dan tersurat imbangan
+Tegarlah sepanjang zaman..
+"""
+    await interaction.response.send_message(mars_text)
+
+@tree.command(name="tri_karma_adhyaksa", description="Menampilkan Tri Karma Adhyaksa.", guild=discord.Object(id=GUILD_ID))
+async def tri_karma_adhyaksa(interaction: discord.Interaction):
+    tri_krama_text = """
+**TRI KRAMA ADHYAKSA**
+
+1.  **Satya**
+    Kesetiaan yang bersumber pada rasa jujur, baik terhadap Tuhan Yang Maha Esa, Diri pribadi dan keluarga maupun kepada sesama manusia.
+
+2.  **Adhi**
+    Kesempurnaan dalam bertugas dan yang berunsur utama pemilikan rasa tanggung jawab terhadap tuhan yang maha esa, keluarga dan sesama manusia.
+
+3.  **Wicaksana**
+    Bijaksana dalam tutur kata dan tingkah laku,khususnya dalam penerapan tugas dan kewenangan.
+"""
+    await interaction.response.send_message(tri_krama_text)
 
 
 # ======= EVENTS =======
