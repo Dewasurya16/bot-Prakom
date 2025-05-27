@@ -11,9 +11,10 @@ from discord import app_commands
 from discord.ext.commands import has_role
 from discord.ui import View, Button, button # Import button dari discord.ui
 
-# Tambahkan ini untuk memuat variabel lingkungan dari file .env
+# --- PENTING: MEMUAT VARIABEL LINGKUNGAN DARI FILE .env ---
 from dotenv import load_dotenv
 load_dotenv()
+# --- AKHIR BAGIAN PENTING ---
 
 # ======= KONFIGURASI =======
 # Ganti GUILD_ID dengan ID server Discord Anda
@@ -45,10 +46,13 @@ PRIVATE_REMINDER_DATA_FILE = "private_reminders.json"
 ROLE_REMINDER_DATA_FILE = "role_reminders.json"
 TICKET_DATA_FILE = "ticket_data.json" # File data untuk tiket
 
+# --- PENTING: PENGATURAN INTENTS ---
+# Pastikan intents ini diaktifkan di Discord Developer Portal Anda
 intents = discord.Intents.default()
-intents.members = True
-intents.message_content = True
-intents.reactions = True
+intents.members = True          # Diperlukan untuk event on_member_join, mengakses daftar member
+intents.message_content = True  # Sangat penting untuk membaca pesan (misal: verifikasi, spam)
+intents.reactions = True        # Diperlukan untuk event on_reaction_add
+# --- AKHIR BAGIAN PENTING ---
 
 bot = commands.Bot(command_prefix="!", intents=intents)
 tree = bot.tree
@@ -1216,5 +1220,25 @@ async def scheduled_announcement(interaction: discord.Interaction, channel: disc
     except Exception as e:
         await interaction.followup.send(f"❌ Terjadi kesalahan saat menjadwalkan pengumuman: {e}", ephemeral=True)
 
-# Contoh penggunaan TOKEN dari file .env
-bot.run(os.getenv("DISCORD_TOKEN"))
+---
+## Jalankan Bot
+
+```python
+if __name__ == "__main__":
+    # Mengambil token dari variabel lingkungan bernama DISCORD_TOKEN
+    TOKEN = os.getenv("DISCORD_TOKEN")
+
+    if not TOKEN:
+        print("❌ ERROR: Variabel lingkungan 'DISCORD_TOKEN' tidak ditemukan.")
+        print("Pastikan Anda telah mengatur variabel lingkungan DISCORD_TOKEN di file .env atau sistem Anda.")
+        # Keluar dari program jika token tidak ditemukan
+        exit(1)
+    else:
+        try:
+            bot.run(TOKEN)
+        except discord.errors.LoginFailure:
+            print("❌ ERROR: Token Discord tidak valid. Harap periksa kembali token Anda di file .env.")
+            exit(1)
+        except Exception as e:
+            print(f"❌ Terjadi kesalahan saat menjalankan bot: {e}")
+            exit(1)
