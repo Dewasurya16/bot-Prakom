@@ -811,7 +811,6 @@ async def set_reminder(
 
 ## Perintah Moderasi (Admin Prakom Only)
 
----
 @tree.command(name="warn", description="Beri peringatan kepada anggota.", guild=discord.Object(id=GUILD_ID))
 @app_commands.describe(
     member="Anggota yang akan diberi peringatan",
@@ -839,7 +838,6 @@ async def warn(interaction: discord.Interaction, member: discord.Member, reason:
         await interaction.followup.send(f"❗ Gagal mengirim DM peringatan ke {member.mention}. Mungkin DM mereka ditutup.", ephemeral=True)
 
 
----
 @tree.command(name="warnings", description="Lihat jumlah peringatan anggota.", guild=discord.Object(id=GUILD_ID))
 @app_commands.describe(member="Anggota yang ingin dilihat peringatannya")
 @is_admin_prakom()
@@ -862,7 +860,6 @@ async def warnings(interaction: discord.Interaction, member: discord.Member):
     embed = discord.Embed(title="Daftar Peringatan", description=description, color=discord.Color.orange())
     await interaction.followup.send(embed=embed, ephemeral=True)
 
----
 @tree.command(name="clear_warnings", description="Hapus semua peringatan anggota.", guild=discord.Object(id=GUILD_ID))
 @app_commands.describe(member="Anggota yang ingin dihapus peringatannya")
 @is_admin_prakom()
@@ -880,7 +877,6 @@ async def clear_warnings(interaction: discord.Interaction, member: discord.Membe
     else:
         await interaction.followup.send(f"❗ {member.mention} tidak memiliki peringatan untuk dihapus.", ephemeral=True)
 
----
 @tree.command(name="mute", description="Mute anggota untuk sementara.", guild=discord.Object(id=GUILD_ID))
 @app_commands.describe(
     member="Anggota yang akan dimute",
@@ -926,7 +922,6 @@ async def mute(interaction: discord.Interaction, member: discord.Member, duratio
     except Exception as e:
         await interaction.followup.send(f"❌ Terjadi kesalahan saat memute: {e}", ephemeral=True)
 
----
 @tree.command(name="unmute", description="Unmute anggota.", guild=discord.Object(id=GUILD_ID))
 @app_commands.describe(member="Anggota yang akan diunmute")
 @is_admin_prakom()
@@ -951,7 +946,6 @@ async def unmute(interaction: discord.Interaction, member: discord.Member):
     except Exception as e:
         await interaction.followup.send(f"❌ Terjadi kesalahan saat mengunmute: {e}", ephemeral=True)
 
----
 @tree.command(name="kick", description="Keluarkan anggota dari server.", guild=discord.Object(id=GUILD_ID))
 @app_commands.describe(
     member="Anggota yang akan dikeluarkan",
@@ -985,7 +979,6 @@ async def kick(interaction: discord.Interaction, member: discord.Member, reason:
     except Exception as e:
         await interaction.followup.send(f"❌ Terjadi kesalahan saat mengeluarkan: {e}", ephemeral=True)
 
----
 @tree.command(name="ban", description="Ban anggota dari server.", guild=discord.Object(id=GUILD_ID))
 @app_commands.describe(
     member="Anggota yang akan diban",
@@ -1019,7 +1012,6 @@ async def ban(interaction: discord.Interaction, member: discord.Member, reason: 
     except Exception as e:
         await interaction.followup.send(f"❌ Terjadi kesalahan saat memban: {e}", ephemeral=True)
 
----
 @tree.command(name="unban", description="Unban anggota dari server.", guild=discord.Object(id=GUILD_ID))
 @app_commands.describe(user_id="ID pengguna yang akan diunban")
 @is_admin_prakom()
@@ -1042,7 +1034,6 @@ async def unban(interaction: discord.Interaction, user_id: str):
     except Exception as e:
         await interaction.followup.send(f"❌ Terjadi kesalahan saat mengunban: {e}", ephemeral=True)
 
----
 @tree.command(name="clear", description="Hapus sejumlah pesan dari channel.", guild=discord.Object(id=GUILD_ID))
 @app_commands.describe(amount="Jumlah pesan yang akan dihapus (maks 100)")
 @is_admin_prakom()
@@ -1064,7 +1055,6 @@ async def clear(interaction: discord.Interaction, amount: int):
     except Exception as e:
         await interaction.followup.send(f"❌ Terjadi kesalahan saat menghapus pesan: {e}", ephemeral=True)
 
----
 @tree.command(name="add_role", description="Berikan role kepada anggota.", guild=discord.Object(id=GUILD_ID))
 @app_commands.describe(
     member="Anggota yang akan diberi role",
@@ -1098,7 +1088,6 @@ async def add_role(interaction: discord.Interaction, member: discord.Member, rol
     except Exception as e:
         await interaction.followup.send(f"❌ Terjadi kesalahan saat memberikan role: {e}", ephemeral=True)
 
----
 @tree.command(name="remove_role", description="Hapus role dari anggota.", guild=discord.Object(id=GUILD_ID))
 @app_commands.describe(
     member="Anggota yang akan dihapus rolenya",
@@ -1128,7 +1117,6 @@ async def remove_role(interaction: discord.Interaction, member: discord.Member, 
     except Exception as e:
         await interaction.followup.send(f"❌ Terjadi kesalahan saat menghapus role: {e}", ephemeral=True)
 
----
 @tree.command(name="create_ticket", description="Buat tiket bantuan.", guild=discord.Object(id=GUILD_ID))
 async def create_ticket(interaction: discord.Interaction):
     await interaction.response.defer(ephemeral=True)
@@ -1153,7 +1141,6 @@ async def create_ticket(interaction: discord.Interaction):
     else:
         await interaction.followup.send(error_message, ephemeral=True)
 
----
 @tree.command(name="announcement", description="Kirim pengumuman ke channel yang ditentukan.", guild=discord.Object(id=GUILD_ID))
 @app_commands.describe(
     channel="Channel tempat pengumuman akan dikirim",
@@ -1182,7 +1169,6 @@ async def announcement(interaction: discord.Interaction, channel: discord.TextCh
     except Exception as e:
         await interaction.followup.send(f"❌ Terjadi kesalahan saat mengirim pengumuman: {e}", ephemeral=True)
 
----
 @tree.command(name="scheduled_announcement", description="Jadwalkan pengumuman ke channel yang ditentukan.", guild=discord.Object(id=GUILD_ID))
 @app_commands.describe(
     channel="Channel tempat pengumuman akan dikirim",
@@ -1220,7 +1206,6 @@ async def scheduled_announcement(interaction: discord.Interaction, channel: disc
     except Exception as e:
         await interaction.followup.send(f"❌ Terjadi kesalahan saat menjadwalkan pengumuman: {e}", ephemeral=True)
 
----
 ## Jalankan Bot
 
 ```python
