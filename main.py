@@ -1207,8 +1207,6 @@ async def scheduled_announcement(interaction: discord.Interaction, channel: disc
         await interaction.followup.send(f"❌ Terjadi kesalahan saat menjadwalkan pengumuman: {e}", ephemeral=True)
 
 ## Jalankan Bot
-
-```python
 if __name__ == "__main__":
     # Mengambil token dari variabel lingkungan bernama DISCORD_TOKEN
     TOKEN = os.getenv("DISCORD_TOKEN")
