@@ -1051,12 +1051,13 @@ async def on_ready():
     load_ticket_data()
     load_level_data()
 
-    try:
-        guild_obj = discord.Object(id=GUILD_ID)
-        synced = await tree.sync(guild=guild_obj)
-        print(f"Slash commands synced: {len(synced)}")
-    except Exception as e:
-        print(f"Gagal sync slash commands: {e}")
+    # Sync slash commands ke seluruh guild tempat bot berada
+    for g in bot.guilds:
+        try:
+            synced = await tree.sync(guild=g)
+            print(f"✅ Slash commands synced ke server '{g.name}' ({g.id}): {len(synced)}")
+        except Exception as e:
+            print(f"⚠️ Gagal sync slash commands ke {g.name}: {e}")
 
     loop_tasks = [
         daily_reminder_task,
@@ -1071,9 +1072,6 @@ async def on_ready():
 
 @bot.event
 async def on_member_join(member: discord.Member):
-    if member.guild.id != GUILD_ID:
-        return
-
     guild = member.guild
 
     role_unverified = discord.utils.get(guild.roles, name=UNVERIFIED_ROLE_NAME)
@@ -1083,13 +1081,16 @@ async def on_member_join(member: discord.Member):
         except Exception:
             pass
 
+    verif_channel = guild.get_channel(VERIFICATION_CHANNEL_ID) or discord.utils.find(lambda c: "verifikasi" in c.name.lower(), guild.text_channels)
+    verif_mention = verif_channel.mention if verif_channel else "#verifikasi"
+
     try:
         dm_embed = discord.Embed(
             title=f"Selamat Datang di {guild.name}! 🏛️",
             description=(
-                f"Halo {member.mention}! Selamat datang di komunitas resmi **Pranata Komputer Kejaksaan RI**.\n\n"
-                f"Agar dapat berinteraksi dan mengakses seluruh channel, silakan buka channel <#{VERIFICATION_CHANNEL_ID}> "
-                f"dan klik tombol **'Verifikasi Sekarang'** untuk mengisi nama dan unit kerja Anda."
+                f"Halo {member.mention}! Selamat datang di komunitas **{guild.name}**.\n\n"
+                f"Agar dapat mengakses seluruh channel, silakan buka channel {verif_mention} "
+                f"dan kirimkan Nama Lengkap Anda atau klik tombol verifikasi."
             ),
             color=CLR_ADHYAKSA_GREEN
         )
@@ -1098,19 +1099,17 @@ async def on_member_join(member: discord.Member):
     except discord.Forbidden:
         pass
 
-    welcome_channel = guild.get_channel(WELCOME_CHANNEL_ID)
+    welcome_channel = guild.get_channel(WELCOME_CHANNEL_ID) or discord.utils.find(lambda c: any(k in c.name.lower() for k in ["selamat-datang", "welcome"]), guild.text_channels)
     if welcome_channel:
         embed = discord.Embed(
             title=f"👋 Selamat Datang, {member.display_name}!",
             description=(
-                f"Selamat datang di server komunitas **Pranata Komputer Kejaksaan RI**! 🎉\n\n"
+                f"Selamat datang di server **{guild.name}**! 🎉\n\n"
                 f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-                f"**📌 3 Langkah Awal Bergabung:**\n"
-                f"**1.** Lakukan verifikasi identitas resmi di <#{VERIFICATION_CHANNEL_ID}>.\n"
-                f"**2.** Ambil peran gender identitas Anda di <#{GENDER_CHANNEL_ID}>.\n"
-                f"**3.** Pahami tata tertib dan etika komunitas di <#{ROLES_CHANNEL_ID}>.\n"
-                f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
-                f"*Mari berkontribusi nyata demi kemajuan teknologi informasi Korps Adhyaksa!*"
+                f"**📌 Langkah Bergabung:**\n"
+                f"1. Lakukan verifikasi nama di {verif_mention}.\n"
+                f"2. Ambil role identitas Anda di channel role.\n"
+                f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
             ),
             color=CLR_NAVY,
             timestamp=datetime.now(WIB)
@@ -1118,6 +1117,68 @@ async def on_member_join(member: discord.Member):
         embed.set_thumbnail(url=member.display_avatar.url)
         embed.set_footer(text="Kejaksaan Republik Indonesia • Satya Adhi Wicaksana")
         await welcome_channel.send(content=f"Selamat datang {member.mention}!", embed=embed)
+
+@bot.event
+async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
+    """Mendukung pemilihan role via reaksi emoji pada pesan lama maupun baru."""
+    if payload.user_id == bot.user.id:
+        return
+
+    guild = bot.get_guild(payload.guild_id)
+    if not guild:
+        return
+
+    channel = guild.get_channel(payload.channel_id)
+    if not channel:
+        return
+
+    # Deteksi apakah channel adalah channel pengambilan role/gender (berdasarkan ID atau nama)
+    is_gender_chan = (
+        channel.id == GENDER_CHANNEL_ID or
+        any(k in channel.name.lower() for k in ["ambil-role", "gender", "pilih-role", "role"])
+    )
+    if not is_gender_chan:
+        return
+
+    member = payload.member or guild.get_member(payload.user_id)
+    if not member or member.bot:
+        return
+
+    role_to_add = None
+    role_to_remove = None
+
+    emoji_name = str(payload.emoji.name)
+    if "👩" in emoji_name:
+        role_to_add = discord.utils.get(guild.roles, name=PRAKOM_CANTIK_ROLE_NAME)
+        role_to_remove = discord.utils.get(guild.roles, name=PRAKOM_GANTENG_ROLE_NAME)
+    elif "👨" in emoji_name:
+        role_to_add = discord.utils.get(guild.roles, name=PRAKOM_GANTENG_ROLE_NAME)
+        role_to_remove = discord.utils.get(guild.roles, name=PRAKOM_CANTIK_ROLE_NAME)
+
+    if role_to_add:
+        try:
+            if role_to_remove and role_to_remove in member.roles:
+                await member.remove_roles(role_to_remove)
+            if role_to_add not in member.roles:
+                await member.add_roles(role_to_add)
+
+            # Lepas role Anggota jika itu sistem server Anda
+            role_anggota = discord.utils.get(guild.roles, name=ANGGOTA_ROLE_NAME)
+            if role_anggota and role_anggota in member.roles:
+                try:
+                    await member.remove_roles(role_anggota)
+                except Exception:
+                    pass
+
+            await channel.send(f"✅ {member.mention} berhasil memilih role **{role_to_add.name}**.", delete_after=6)
+        except discord.Forbidden:
+            await channel.send(
+                f"❌ Bot tidak memiliki izin mengubah role {member.mention}. "
+                f"Pastikan role bot berada di urutan **paling atas** di Server Settings -> Roles!",
+                delete_after=10
+            )
+        except Exception as e:
+            print(f"Error on_raw_reaction_add: {e}")
 
 @bot.event
 async def on_message(message: discord.Message):
@@ -1185,37 +1246,77 @@ async def on_message(message: discord.Message):
         level_data[user_id_str] = user_data
         save_level_data()
 
-    # Verifikasi Manual Teks (Fallback)
-    if message.guild.id == GUILD_ID and message.channel.id == VERIFICATION_CHANNEL_ID:
+    # Verifikasi Manual Teks (Mendukung ID atau nama channel 'verifikasi')
+    is_verif_channel = (
+        message.channel.id == VERIFICATION_CHANNEL_ID or
+        any(k in message.channel.name.lower() for k in ["verifikasi", "verify", "verification"])
+    )
+    if is_verif_channel:
         member = message.author
         role_unverified = discord.utils.get(message.guild.roles, name=UNVERIFIED_ROLE_NAME)
         role_anggota = discord.utils.get(message.guild.roles, name=ANGGOTA_ROLE_NAME)
 
-        if (role_unverified and role_unverified in member.roles) or (role_anggota and role_anggota not in member.roles):
-            nama_baru = message.content.strip()[:32]
-            try:
-                await member.edit(nick=nama_baru)
-            except Exception:
-                pass
+        nama_baru = message.content.strip()[:32]
+        nick_ok = True
+        try:
+            await member.edit(nick=nama_baru)
+        except Exception as e:
+            nick_ok = False
+            print(f"Gagal ganti nickname (aturan hierarki role Discord): {e}")
 
-            try:
-                if role_unverified and role_unverified in member.roles:
-                    await member.remove_roles(role_unverified)
-                if role_anggota and role_anggota not in member.roles:
-                    await member.add_roles(role_anggota)
-            except Exception:
-                pass
+        roles_managed = False
+        try:
+            if role_unverified and role_unverified in member.roles:
+                await member.remove_roles(role_unverified)
+                roles_managed = True
+            if role_anggota and role_anggota not in member.roles:
+                await member.add_roles(role_anggota)
+                roles_managed = True
+        except discord.Forbidden:
+            await message.channel.send(
+                f"❌ Bot tidak memiliki izin mengelola role untuk {member.mention}. "
+                f"Pastikan role Bot berada di urutan **paling atas** di Server Settings -> Roles!",
+                delete_after=10
+            )
 
-            log_channel = message.guild.get_channel(LOG_CHANNEL_ID)
-            if log_channel:
-                await log_channel.send(f"🟢 {member.mention} terverifikasi via teks dengan nama **{nama_baru}**.")
+        resp_text = f"✅ Verifikasi berhasil untuk {member.mention}!"
+        if not nick_ok:
+            resp_text += " *(Catatan: Nickname akun Owner/Admin tidak dapat diubah otomatis oleh bot sesuai batasan Discord)*"
 
+        # Kirim konfirmasi langsung di channel agar terlihat oleh pengguna
+        await message.channel.send(resp_text, delete_after=10)
+
+        # Cari channel gender/role untuk mengirim instruksi memilih gender
+        gender_channel = message.guild.get_channel(GENDER_CHANNEL_ID) or discord.utils.find(
+            lambda c: any(k in c.name.lower() for k in ["ambil-role", "gender", "pilih-role"]),
+            message.guild.text_channels
+        )
+        if gender_channel:
             try:
-                await message.delete()
-            except Exception:
-                pass
+                pesan_gender = await gender_channel.send(
+                    f"{member.mention}, silakan pilih jenis kelamin Anda dengan reaksi berikut:\n"
+                    f"👩 = {PRAKOM_CANTIK_ROLE_NAME}\n"
+                    f"👨 = {PRAKOM_GANTENG_ROLE_NAME}"
+                )
+                await pesan_gender.add_reaction("👩")
+                await pesan_gender.add_reaction("👨")
+            except Exception as e:
+                print(f"Gagal kirim prompt gender: {e}")
+
+        log_channel = message.guild.get_channel(LOG_CHANNEL_ID) or discord.utils.find(
+            lambda c: "log" in c.name.lower(), message.guild.text_channels
+        )
+        if log_channel:
+            await log_channel.send(f"🟢 {member.mention} terverifikasi via teks dengan nama **{nama_baru}**.")
+
+        await asyncio.sleep(4)
+        try:
+            await message.delete()
+        except Exception:
+            pass
 
     await bot.process_commands(message)
+
 
 # ======= SLASH COMMANDS: INFORMASI & ADHYAKSA =======
 
