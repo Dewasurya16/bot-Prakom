@@ -2267,6 +2267,13 @@ if __name__ == "__main__":
         exit(1)
     else:
         try:
+            from keep_alive import keep_alive
+            keep_alive()
+            print("🌐 Server Keep-Alive Web aktif di port 8080 (Replit / UptimeRobot)")
+        except Exception as e:
+            print(f"ℹ️ Server Keep-Alive tidak dijalankan: {e}")
+
+        try:
             bot.run(TOKEN)
         except discord.errors.LoginFailure:
             print("❌ ERROR: Token Discord tidak valid. Harap periksa kembali token Anda di file .env.")
