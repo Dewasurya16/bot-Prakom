@@ -1,527 +1,374 @@
 import os
-import discord
-from discord.ext import commands, tasks
+import io
+import json
+import random
 import asyncio
+import uuid
 from collections import defaultdict
 from datetime import datetime, time, timedelta, timezone
-import random
-import json
 
+import discord
 from discord import app_commands
-from discord.ext.commands import has_role
-from discord.ui import View, Button, button # Import button dari discord.ui
-
-# --- PENTING: MEMUAT VARIABEL LINGKUNGAN DARI FILE .env ---
+from discord.ext import commands, tasks
+from discord.ui import View, Button, button, Modal, TextInput, Select
 from dotenv import load_dotenv
+
+# --- MEMUAT VARIABEL LINGKUNGAN DARI FILE .env ---
 load_dotenv()
-# --- AKHIR BAGIAN PENTING ---
 
-# ======= KONFIGURASI =======
-# Ganti GUILD_ID dengan ID server Discord Anda
-GUILD_ID = 1375444915403751424
-POST_CHANNEL_ID = 1375939507114741872
-DAILY_ANNOUNCEMENT_CHANNEL_ID = 1375939507114741872
-WELCOME_CHANNEL_ID = 1375824875838505020
-VERIFICATION_CHANNEL_ID = 1375775766482128906
-GENDER_CHANNEL_ID = 1375768360637436005
-LOG_CHANNEL_ID = 1375886856188727357
-LOGADMIN_CHANNEL_ID = 1376050661199708181
-ANNOUNCEMENT_CHANNEL_ID = 1375821960637845564
-ROLES_CHANNEL_ID = 1375444916519440468
-MUTE_ROLE_NAME = "Muted"
-ADMIN_PRAKOM_ROLE = "Admin Prakom"
-TICKET_CATEGORY_NAME = "Tiket"
-UNVERIFIED_ROLE_NAME = "Unverified"
-ANGGOTA_ROLE_NAME = "Anggota" # Pastikan nama role ini sesuai di server Anda
-PRAKOM_CANTIK_ROLE_NAME = "Prakom Cantik"
-PRAKOM_GANTENG_ROLE_NAME = "Prakom Ganteng"
+# ======= PALET WARNA RESMI & AESTHETIC KORPS ADHYAKSA =======
+CLR_ADHYAKSA_GREEN = 0x0F5132  # Hijau resmi Kejaksaan RI
+CLR_ADHYAKSA_GOLD  = 0xD4AF37  # Emas keagungan Adhyaksa
+CLR_NAVY           = 0x1B365D  # Biru formal kepemerintahan
+CLR_EMERALD        = 0x2ECC71  # Hijau sukses cerah
+CLR_CRIMSON        = 0xE74C3C  # Merah bahaya / tutup
+CLR_AMBER          = 0xF39C12  # Kuning peringatan
+CLR_CYAN           = 0x00A8FF  # Biru muda modern
+CLR_PURPLE         = 0x9B59B6  # Ungu elegan
+CLR_DARK           = 0x23272A  # Dark mode elegan
 
-SPAM_THRESHOLD = 5
-SPAM_INTERVAL = 10  # detik
-MUTE_DURATION = 60  # detik
+# ======= KONFIGURASI SERVER & CHANNEL =======
+GUILD_ID = int(os.getenv("GUILD_ID", 1375444915403751424))
+POST_CHANNEL_ID = int(os.getenv("POST_CHANNEL_ID", 1375939507114741872))
+DAILY_ANNOUNCEMENT_CHANNEL_ID = int(os.getenv("DAILY_ANNOUNCEMENT_CHANNEL_ID", 1375939507114741872))
+WELCOME_CHANNEL_ID = int(os.getenv("WELCOME_CHANNEL_ID", 1375824875838505020))
+VERIFICATION_CHANNEL_ID = int(os.getenv("VERIFICATION_CHANNEL_ID", 1375775766482128906))
+GENDER_CHANNEL_ID = int(os.getenv("GENDER_CHANNEL_ID", 1375768360637436005))
+LOG_CHANNEL_ID = int(os.getenv("LOG_CHANNEL_ID", 1375886856188727357))
+LOGADMIN_CHANNEL_ID = int(os.getenv("LOGADMIN_CHANNEL_ID", 1376050661199708181))
+ANNOUNCEMENT_CHANNEL_ID = int(os.getenv("ANNOUNCEMENT_CHANNEL_ID", 1375821960637845564))
+ROLES_CHANNEL_ID = int(os.getenv("ROLES_CHANNEL_ID", 1375444916519440468))
 
-# File data untuk persistensi
+# Nama Role
+MUTE_ROLE_NAME = os.getenv("MUTE_ROLE_NAME", "Muted")
+ADMIN_PRAKOM_ROLE = os.getenv("ADMIN_PRAKOM_ROLE", "Admin Prakom")
+TICKET_CATEGORY_NAME = os.getenv("TICKET_CATEGORY_NAME", "Tiket")
+UNVERIFIED_ROLE_NAME = os.getenv("UNVERIFIED_ROLE_NAME", "Unverified")
+ANGGOTA_ROLE_NAME = os.getenv("ANGGOTA_ROLE_NAME", "Anggota")
+PRAKOM_CANTIK_ROLE_NAME = os.getenv("PRAKOM_CANTIK_ROLE_NAME", "Prakom Cantik")
+PRAKOM_GANTENG_ROLE_NAME = os.getenv("PRAKOM_GANTENG_ROLE_NAME", "Prakom Ganteng")
+
+# Pengaturan Moderasi & XP
+SPAM_THRESHOLD = int(os.getenv("SPAM_THRESHOLD", 5))
+SPAM_INTERVAL = int(os.getenv("SPAM_INTERVAL", 10))   # detik
+MUTE_DURATION = int(os.getenv("MUTE_DURATION", 60))   # detik (untuk timeout spam)
+XP_COOLDOWN = int(os.getenv("XP_COOLDOWN", 60))       # cooldown perolehan XP (detik)
+
+# File Data Persisten
 WARN_DATA_FILE = "warn_data.json"
 PRIVATE_REMINDER_DATA_FILE = "private_reminders.json"
 ROLE_REMINDER_DATA_FILE = "role_reminders.json"
-TICKET_DATA_FILE = "ticket_data.json" # File data untuk tiket
-
-# --- PENTING: PENGATURAN INTENTS ---
-# Pastikan intents ini diaktifkan di Discord Developer Portal Anda
-intents = discord.Intents.default()
-intents.members = True          # Diperlukan untuk event on_member_join, mengakses daftar member
-intents.message_content = True  # Sangat penting untuk membaca pesan (misal: verifikasi, spam)
-intents.reactions = True        # Diperlukan untuk event on_reaction_add
-# --- AKHIR BAGIAN PENTING ---
-
-bot = commands.Bot(command_prefix="!", intents=intents)
-tree = bot.tree
+TICKET_DATA_FILE = "ticket_data.json"
+PUBLIC_REMINDER_DATA_FILE = "public_reminders.json"
+LEVEL_DATA_FILE = "level_data.json"
 
 # DEFINISI ZONA WAKTU WIB (UTC+7)
 WIB = timezone(timedelta(hours=7))
+BOT_START_TIME = datetime.now(WIB)
 
-# ======= GLOBAL VARIABLES =======
+# --- PENGATURAN INTENTS ---
+intents = discord.Intents.default()
+intents.members = True          # Membaca member join & update member
+intents.message_content = True  # Membaca isi pesan
+intents.reactions = True        # Membaca reaksi
+
+# ======= GLOBAL VARIABLES (IN-MEMORY CACHE) =======
 user_messages = defaultdict(list)
-user_xp = defaultdict(int)
-user_level = defaultdict(int)
+inactive_tickets = {} # {channel_id: datetime}
+active_tickets = {}   # {channel_id: {"owner_id": user_id, "claimed_by": admin_id (opsional)}}
 
-public_reminders = defaultdict(list)
-inactive_tickets = {} # Dictionary untuk melacak aktivitas tiket
-active_tickets = {} # {channel_id: {"owner_id": user_id, "claimed_by": admin_id (opsional)}}
-
-# Data yang akan disimpan ke file
 warn_data = {}
 private_reminders_data = {}
+public_reminders_data = defaultdict(list)
 role_reminders = []
+level_data = {}
 
-# ======= FUNGSI LOAD/SAVE DATA =======
+# ======= HELPER TIER JABATAN PRAKOM =======
+def get_prakom_tier(level: int):
+    """Menghasilkan gelar jenjang fungsional Prakom berdasarkan level XP."""
+    if level >= 25:
+        return "💎 Prakom Ahli Madya", "Senior Systems Architect"
+    elif level >= 15:
+        return "🥇 Prakom Ahli Muda", "Senior Software / Infra Engineer"
+    elif level >= 10:
+        return "🥈 Prakom Ahli Pertama", "Systems / Data Specialist"
+    elif level >= 5:
+        return "🥉 Prakom Terampil / Mahir", "Technical Support Specialist"
+    else:
+        return "🔰 Prakom Pemula", "Junior IT Personnel"
+
+def create_progress_bar(current: int, total: int, length: int = 12) -> str:
+    """Membuat progress bar unicode modern dengan style sleek block."""
+    if total <= 0:
+        total = 1
+    percent = max(0.0, min(1.0, current / total))
+    filled_length = int(length * percent)
+    empty_length = length - filled_length
+    bar = "▰" * filled_length + "▱" * empty_length
+    return f"`[{bar}]` **{int(percent * 100)}%**"
+
+# ======= FUNGSI PERSISTENSI DATA AMAN (ATOMIC WRITE) =======
+def safe_save_json(filename: str, data: any):
+    temp_file = f"{filename}.tmp"
+    try:
+        with open(temp_file, 'w', encoding='utf-8') as f:
+            json.dump(data, f, indent=4, ensure_ascii=False)
+        os.replace(temp_file, filename)
+    except Exception as e:
+        print(f"❌ Gagal menyimpan {filename}: {e}")
+        if os.path.exists(temp_file):
+            try:
+                os.remove(temp_file)
+            except Exception:
+                pass
+
+def safe_load_json(filename: str, default: any = None):
+    if default is None:
+        default = {}
+    if not os.path.exists(filename):
+        return default
+    try:
+        with open(filename, 'r', encoding='utf-8') as f:
+            return json.load(f)
+    except Exception as e:
+        print(f"⚠️ Gagal membaca {filename}: {e}")
+        return default
+
 def load_warn_data():
     global warn_data
-    if os.path.exists(WARN_DATA_FILE):
-        with open(WARN_DATA_FILE, 'r') as f:
-            warn_data = json.load(f)
-    else:
-        warn_data = {}
+    warn_data = safe_load_json(WARN_DATA_FILE, {})
 
 def save_warn_data():
-    with open(WARN_DATA_FILE, 'w') as f:
-        json.dump(warn_data, f, indent=4)
+    safe_save_json(WARN_DATA_FILE, warn_data)
 
 def load_private_reminders():
     global private_reminders_data
-    if os.path.exists(PRIVATE_REMINDER_DATA_FILE):
-        with open(PRIVATE_REMINDER_DATA_FILE, 'r') as f:
-            data = json.load(f)
-            private_reminders_data = {
-                user_id: [
-                    {
-                        "time": datetime.fromisoformat(rem["time"]),
-                        "message": rem["message"]
-                    } for rem in reminders
-                ] for user_id, reminders in data.items()
-            }
-    else:
-        private_reminders_data = {}
+    raw = safe_load_json(PRIVATE_REMINDER_DATA_FILE, {})
+    private_reminders_data = {}
+    for uid, reminders in raw.items():
+        parsed = []
+        for rem in reminders:
+            try:
+                dt = datetime.fromisoformat(rem["time"])
+                if dt.tzinfo is None:
+                    dt = dt.replace(tzinfo=WIB)
+                parsed.append({
+                    "id": rem.get("id", str(uuid.uuid4())[:8]),
+                    "time": dt,
+                    "message": rem["message"]
+                })
+            except Exception:
+                pass
+        private_reminders_data[uid] = parsed
 
 def save_private_reminders():
     data_to_save = {
-        user_id: [
+        uid: [
             {
-                "time": rem["time"].isoformat(),
+                "id": rem.get("id", str(uuid.uuid4())[:8]),
+                "time": rem["time"].isoformat() if isinstance(rem["time"], datetime) else rem["time"],
                 "message": rem["message"]
             } for rem in reminders
-        ] for user_id, reminders in private_reminders_data.items()
+        ] for uid, reminders in private_reminders_data.items()
     }
-    with open(PRIVATE_REMINDER_DATA_FILE, 'w') as f:
-        json.dump(data_to_save, f, indent=4)
+    safe_save_json(PRIVATE_REMINDER_DATA_FILE, data_to_save)
+
+def load_public_reminders():
+    global public_reminders_data
+    raw = safe_load_json(PUBLIC_REMINDER_DATA_FILE, {})
+    public_reminders_data = defaultdict(list)
+    for cid, rem_list in raw.items():
+        public_reminders_data[int(cid)] = rem_list
+
+def save_public_reminders():
+    data_to_save = {str(cid): rem_list for cid, rem_list in public_reminders_data.items()}
+    safe_save_json(PUBLIC_REMINDER_DATA_FILE, data_to_save)
 
 def load_role_reminders():
     global role_reminders
-    if os.path.exists(ROLE_REMINDER_DATA_FILE):
-        with open(ROLE_REMINDER_DATA_FILE, 'r') as f:
-            data = json.load(f)
-            role_reminders = []
-            for rem in data:
-                if "waktu" in rem:
-                    rem["waktu"] = datetime.fromisoformat(rem["waktu"])
-                role_reminders.append(rem)
-    else:
-        role_reminders = []
+    raw = safe_load_json(ROLE_REMINDER_DATA_FILE, [])
+    role_reminders = []
+    for rem in raw:
+        temp = rem.copy()
+        if "waktu" in temp and isinstance(temp["waktu"], str):
+            try:
+                dt = datetime.fromisoformat(temp["waktu"])
+                if dt.tzinfo is None:
+                    dt = dt.replace(tzinfo=WIB)
+                temp["waktu"] = dt
+            except Exception:
+                pass
+        if "id" not in temp:
+            temp["id"] = str(uuid.uuid4())[:8]
+        role_reminders.append(temp)
 
 def save_role_reminders():
     data_to_save = []
     for rem in role_reminders:
-        temp_rem = rem.copy()
-        if "waktu" in temp_rem and isinstance(temp_rem["waktu"], datetime):
-            temp_rem["waktu"] = temp_rem["waktu"].isoformat()
-        data_to_save.append(temp_rem)
-    with open(ROLE_REMINDER_DATA_FILE, 'w') as f:
-        json.dump(data_to_save, f, indent=4)
+        temp = rem.copy()
+        if "waktu" in temp and isinstance(temp["waktu"], datetime):
+            temp["waktu"] = temp["waktu"].isoformat()
+        data_to_save.append(temp)
+    safe_save_json(ROLE_REMINDER_DATA_FILE, data_to_save)
 
 def load_ticket_data():
-    global active_tickets
-    if os.path.exists(TICKET_DATA_FILE):
-        with open(TICKET_DATA_FILE, 'r') as f:
-            data = json.load(f)
-            active_tickets = {
-                int(channel_id): ticket_info for channel_id, ticket_info in data.items()
-            }
-            # Re-populate inactive_tickets based on loaded active_tickets
-            for channel_id, ticket_info in active_tickets.items():
-                inactive_tickets[channel_id] = datetime.now(WIB) # Set waktu aktif terbaru saat bot restart
-    else:
-        active_tickets = {}
+    global active_tickets, inactive_tickets
+    raw = safe_load_json(TICKET_DATA_FILE, {})
+    active_tickets = {int(k): v for k, v in raw.items()}
+    now = datetime.now(WIB)
+    for cid in active_tickets:
+        inactive_tickets[cid] = now
 
 def save_ticket_data():
-    with open(TICKET_DATA_FILE, 'w') as f:
-        json.dump(active_tickets, f, indent=4)
+    safe_save_json(TICKET_DATA_FILE, active_tickets)
+
+def load_level_data():
+    global level_data
+    level_data = safe_load_json(LEVEL_DATA_FILE, {})
+
+def save_level_data():
+    safe_save_json(LEVEL_DATA_FILE, level_data)
 
 # ======= KUTIPAN & TEMPLAT =======
 DAILY_QUOTES = [
-    "Tetap semangat, hari ini penuh peluang!",
-    "Jangan menyerah, kamu lebih kuat dari yang kamu kira.",
-    "Langkah kecil hari ini bisa jadi awal dari hal besar.",
-    "Kerja kerasmu akan membuahkan hasil.",
-    "Hidup memberi kita banyak pelajaran, tergantung pada kita apakah kita mau mempelajarinya",
-    "Perjuangan merupakan tanda perjalananmu menuju sukses.",
-    "Kesepian terburuk adalah tidak nyaman dengan diri sendiri.",
-    "Jadilah pribadi yang menantang masa depan, bukan pengecut yang aman di zona nyaman.",
-    "Kesuksesan tidak datang dari kemampuan, tetapi dari kerja keras.",
-    "Jangan takut mencoba hal baru. Ingat, kapal tidak akan berlayar jika hanya diam di pelabuhan.",
-    "Setiap hari adalah kesempatan baru untuk menjadi versi terbaik dari dirimu.",
-    "Kegagalan adalah guru terbaik. Pelajari darinya dan terus melangkah.",
-    "Fokus pada kemajuan, bukan kesempurnaan.",
-    "Pikiran positif akan menarik hal-hal positif. Percayalah pada dirimu!",
-    "Orang sukses tidak pernah menyerah. Mereka terus belajar dan beradaptasi.",
-    "Nikmati perjalananmu, bukan hanya tujuan akhirnya.",
-    "Berani bermimpi besar, dan berani untuk mewujudkannya.",
-    "Keajaiban ada di mana-mana, cukup buka matamu.",
-    "Kemarin adalah sejarah, besok adalah misteri, hari ini adalah hadiah. Itu sebabnya disebut saat ini.",
-    "Hal terbaik tentang masa depan adalah ia datang satu hari pada satu waktu."
+    "Satya Adhi Wicaksana: Bekerja dengan jujur, sempurna dalam tugas, dan bijaksana dalam setiap keputusan.",
+    "Langkah kecil hari ini dalam mengelola sistem informasi adalah pondasi kokoh bagi penegakan hukum modern.",
+    "Teknologi hanyalah alat, dedikasi dan integritas Insan Prakom adalah motor penggerak peradaban.",
+    "Jangan menyerah saat menghadapi kendala teknis; setiap bug dan tantangan adalah guru terbaik.",
+    "Fokus pada kemajuan dan transparansi pelayanan hukum berbasis digital di seluruh penjuru negeri.",
+    "Setiap hari adalah kesempatan baru untuk memberikan karya terbaik bagi Kejaksaan Republik Indonesia.",
+    "Jadilah pribadi yang berani berinovasi, membawa transformasi positif di era digitalisasi birokrasi.",
+    "Kesuksesan sejati diraih dari ketekunan, dedikasi tanpa pamrih, dan kebersamaan tim yang solid."
 ]
 
-DAILY_ANNOUNCEMENT_TEMPLATE = (
-    "Selamat pagi semua! 🌞\n\n"
-    "📌 Jangan lupa:\n"
-    "- Cek dan kerjakan tugas yang ada hari ini.\n"
-    "- Buka Mola untuk informasi terbaru dan proges SK KAMU.\n"
-    "- Tetap semangat dan jaga kesehatan!"
-)
-
-# ======= FUNGSI BANTUAN =======
+# ======= FUNGSI BANTUAN & CHECK =======
 def is_admin_prakom():
     async def predicate(interaction: discord.Interaction):
+        if not interaction.guild:
+            return False
+        if interaction.user.id == interaction.guild.owner_id or interaction.user.guild_permissions.administrator:
+            return True
         role = discord.utils.get(interaction.user.roles, name=ADMIN_PRAKOM_ROLE)
         if role:
             return True
-        await interaction.response.send_message(
-            "❌ Kamu tidak punya izin untuk menggunakan command ini.",
-            ephemeral=True)
+        embed = discord.Embed(
+            title="🚫 Akses Ditolak",
+            description=(
+                "Perintah ini hanya dapat dijalankan oleh **Administrator Server** atau "
+                f"anggota yang memiliki role **{ADMIN_PRAKOM_ROLE}**."
+            ),
+            color=CLR_CRIMSON
+        )
+        if not interaction.response.is_done():
+            await interaction.response.send_message(embed=embed, ephemeral=True)
+        else:
+            await interaction.followup.send(embed=embed, ephemeral=True)
         return False
     return app_commands.check(predicate)
 
-async def create_ticket_channel(guild, user):
-    existing_channel = discord.utils.get(
-        guild.channels, name=f"tiket-{user.name.lower().replace(' ', '-')}")
+async def generate_ticket_transcript(channel: discord.TextChannel) -> io.BytesIO:
+    buffer = io.StringIO()
+    buffer.write("╔" + "═" * 68 + "╗\n")
+    buffer.write(f"║ TRANSKRIP RESMI TIKET BANTUAN TEKNIS PRAKOM{' ' * 24}║\n")
+    buffer.write(f"║ Channel: #{channel.name:<58}║\n")
+    buffer.write(f"║ Server : {channel.guild.name:<58}║\n")
+    buffer.write(f"║ Waktu  : {datetime.now(WIB).strftime('%d %B %Y, %H:%M:%S WIB'):<58}║\n")
+    buffer.write("╚" + "═" * 68 + "╝\n\n")
+
+    messages = []
+    async for msg in channel.history(limit=500, oldest_first=True):
+        messages.append(msg)
+
+    for msg in messages:
+        ts = msg.created_at.astimezone(WIB).strftime('%Y-%m-%d %H:%M:%S')
+        author = f"{msg.author.display_name} ({msg.author.name})"
+        content = msg.clean_content or "[Lampiran/Media tanpa teks]"
+        buffer.write(f"[{ts}] {author}:\n{content}\n")
+        if msg.attachments:
+            for att in msg.attachments:
+                buffer.write(f"   📎 Lampiran: {att.filename} -> {att.url}\n")
+        buffer.write("-" * 50 + "\n")
+
+    buffer.seek(0)
+    bytes_io = io.BytesIO(buffer.getvalue().encode('utf-8'))
+    bytes_io.seek(0)
+    return bytes_io
+
+async def create_ticket_channel(guild: discord.Guild, user: discord.Member):
+    safe_username = "".join(c for c in user.name.lower() if c.isalnum() or c in "-_")[:18]
+    ticket_name = f"tiket-{safe_username}"
+
+    existing_channel = discord.utils.get(guild.channels, name=ticket_name)
     if existing_channel:
-        return None, "❗ Kamu sudah punya tiket terbuka. Silakan gunakan tiket yang sudah ada."
+        return None, "❗ Anda sudah memiliki tiket bantuan aktif yang belum ditutup. Silakan gunakan channel tiket tersebut."
 
     category = discord.utils.get(guild.categories, name=TICKET_CATEGORY_NAME)
     if not category:
         try:
             category = await guild.create_category(TICKET_CATEGORY_NAME)
         except discord.Forbidden:
-            return None, "❌ Bot tidak memiliki izin untuk membuat kategori tiket."
+            return None, "❌ Bot tidak memiliki izin untuk membuat kategori tiket baru."
 
     overwrites = {
         guild.default_role: discord.PermissionOverwrite(read_messages=False),
-        user: discord.PermissionOverwrite(read_messages=True, send_messages=True),
+        user: discord.PermissionOverwrite(read_messages=True, send_messages=True, attach_files=True, embed_links=True),
+        guild.me: discord.PermissionOverwrite(read_messages=True, send_messages=True, manage_channels=True)
     }
 
     admin_role = discord.utils.get(guild.roles, name=ADMIN_PRAKOM_ROLE)
     if admin_role:
-        overwrites[admin_role] = discord.PermissionOverwrite(read_messages=True, send_messages=True)
+        overwrites[admin_role] = discord.PermissionOverwrite(read_messages=True, send_messages=True, attach_files=True)
 
     try:
         channel = await guild.create_text_channel(
-            f"tiket-{user.name.lower().replace(' ', '-')}",
+            name=ticket_name,
             category=category,
-            overwrites=overwrites)
+            overwrites=overwrites
+        )
     except discord.Forbidden:
-        return None, "❌ Bot tidak memiliki izin untuk membuat channel tiket."
+        return None, "❌ Bot tidak memiliki izin `Manage Channels` untuk membuat channel tiket."
     except Exception as e:
-        return None, f"❌ Terjadi kesalahan saat membuat channel: {e}"
+        return None, f"❌ Terjadi kesalahan teknis saat membuat channel: {e}"
 
     active_tickets[channel.id] = {"owner_id": user.id, "claimed_by": None}
     save_ticket_data()
-
     inactive_tickets[channel.id] = datetime.now(WIB)
     return channel, None
 
-# ======= VIEWS (Tombol Interaktif) =======
-class TicketButtons(View):
-    def __init__(self, owner: discord.Member, ticket_channel_id: int):
-        super().__init__(timeout=None) # Timeout=None agar view tetap aktif
-        self.owner = owner
-        self.ticket_channel_id = ticket_channel_id
+# ======= VIEWS & MODALS (PREMIUM DISCORD UI) =======
 
-    @button(label="Tutup Tiket", style=discord.ButtonStyle.red, custom_id="close_ticket")
-    async def close_ticket_callback(self, interaction: discord.Interaction, button: button):
-        # Hanya pemilik tiket atau Admin Prakom yang bisa menutup
-        admin_role = discord.utils.get(interaction.guild.roles, name=ADMIN_PRAKOM_ROLE)
-        if interaction.user.id == self.owner.id or (admin_role and admin_role in interaction.user.roles):
-            channel = bot.get_channel(self.ticket_channel_id)
-            if not channel:
-                await interaction.response.send_message("❌ Channel tiket tidak ditemukan.", ephemeral=True)
-                return
+class VerificationModal(Modal, title="Formulir Verifikasi Anggota"):
+    nama_lengkap = TextInput(
+        label="Nama Lengkap & Gelar",
+        placeholder="Contoh: Budi Santoso, S.Kom., M.T.I.",
+        required=True,
+        max_length=60
+    )
+    instansi = TextInput(
+        label="Satker / Instansi & Jabatan",
+        placeholder="Contoh: Kejari Tanjungpinang / Prakom Ahli Pertama",
+        required=True,
+        max_length=60
+    )
 
-            await interaction.response.send_message("Tiket akan ditutup dalam 5 detik...", ephemeral=True)
-            await asyncio.sleep(5)
-            try:
-                if channel.id in active_tickets:
-                    del active_tickets[channel.id]
-                    save_ticket_data()
-                if channel.id in inactive_tickets:
-                    del inactive_tickets[channel.id]
+    async def on_submit(self, interaction: discord.Interaction):
+        await interaction.response.defer(ephemeral=True)
+        guild = interaction.guild
+        member = interaction.user
 
-                log_admin_channel = interaction.guild.get_channel(LOGADMIN_CHANNEL_ID)
-                if log_admin_channel:
-                    await log_admin_channel.send(f"🔒 **Tiket Ditutup:** Tiket `{channel.name}` (dibuat oleh <@{self.owner.id}>) telah ditutup oleh {interaction.user.mention}.")
+        nama = self.nama_lengkap.value.strip()
+        satker = self.instansi.value.strip()
 
-                await channel.delete()
-            except discord.Forbidden:
-                await interaction.channel.send("❌ Gagal menutup tiket. Bot tidak memiliki izin.", ephemeral=True)
-            except Exception as e:
-                print(f"Gagal menutup tiket: {e}")
-                await interaction.channel.send(f"❌ Terjadi kesalahan saat menutup tiket: {e}", ephemeral=True)
-        else:
-            await interaction.response.send_message("❌ Kamu tidak punya izin untuk menutup tiket ini.", ephemeral=True)
+        # Format nickname maksimal 32 karakter Discord
+        new_nick = f"{nama} [{satker}]"
+        if len(new_nick) > 32:
+            new_nick = nama[:32]
 
-    @button(label="Klaim Tiket", style=discord.ButtonStyle.blurple, custom_id="claim_ticket")
-    async def claim_ticket_callback(self, interaction: discord.Interaction, button: button):
-        admin_role = discord.utils.get(interaction.guild.roles, name=ADMIN_PRAKOM_ROLE)
-        if not (admin_role and admin_role in interaction.user.roles):
-            await interaction.response.send_message("❌ Kamu tidak punya izin untuk mengklaim tiket ini.", ephemeral=True)
-            return
-
-        channel = bot.get_channel(self.ticket_channel_id)
-        if not channel:
-            await interaction.response.send_message("❌ Channel tiket tidak ditemukan.", ephemeral=True)
-            return
-
-        if channel.id in active_tickets:
-            if active_tickets[channel.id]["claimed_by"]:
-                claimed_by_user = bot.get_user(active_tickets[channel.id]["claimed_by"])
-                await interaction.response.send_message(
-                    f"❗ Tiket ini sudah diklaim oleh {claimed_by_user.mention if claimed_by_user else 'admin lain'}."
-                    f" Jika kamu ingin mengambil alih, silakan koordinasi dengan admin yang mengklaim.",
-                    ephemeral=True
-                )
-                return
-            else:
-                active_tickets[channel.id]["claimed_by"] = interaction.user.id
-                save_ticket_data()
-
-                # Tambahkan izin baca/tulis untuk admin yang mengklaim
-                await channel.set_permissions(interaction.user, read_messages=True, send_messages=True)
-
-                await interaction.response.send_message(f"✅ Tiket ini sekarang diklaim oleh {interaction.user.mention}. Silakan bantu pengguna ini.", ephemeral=False)
-
-                log_admin_channel = interaction.guild.get_channel(LOGADMIN_CHANNEL_ID)
-                if log_admin_channel:
-                    await log_admin_channel.send(f"➡️ **Tiket Diklaim:** Tiket `{channel.name}` (dibuat oleh <@{self.owner.id}>) telah diklaim oleh {interaction.user.mention}.")
-
-                # Nonaktifkan tombol klaim setelah tiket diklaim
-                button.disabled = True
-                await interaction.message.edit(view=self)
-        else:
-            await interaction.response.send_message("❗ Data tiket ini tidak ditemukan, mungkin sudah ditutup.", ephemeral=True)
-@tree.command(name="mars_adhyaksa", description="Menampilkan lirik Mars Adhyaksa.", guild=discord.Object(id=GUILD_ID))
-async def mars_adhyaksa(interaction: discord.Interaction):
-    mars_text = """
-**MARS ADHYAKSA**
-
-Satya Adi Wicaksana dasar Tripsila Adhyaksa
-Landasan jiwa Kejaksaan sebagai abdi masyarakat
-Setia dan sempurna
-Melaksanakan tugas kewajiban
-Tanggung jawab pada Tuhan,
-Keluarga dan sesama manusia
-
-Abdi negara sebagai penegak hukum
-Yang berlambangkan pedang nan sakti
-Insan Adhyaksa sebagai pedamba
-Keadilan dan perwujudan hukum pasti
-
-Kita basmi kemungkaran
-Kebatilan dan kejahatan yang
-Tersirat dan tersurat imbangan
-Tegarlah sepanjang zaman..
-"""
-    await interaction.response.send_message(mars_text)
-
-@tree.command(name="tri_karma_adhyaksa", description="Menampilkan Tri Karma Adhyaksa.", guild=discord.Object(id=GUILD_ID))
-async def tri_karma_adhyaksa(interaction: discord.Interaction):
-    tri_krama_text = """
-**TRI KRAMA ADHYAKSA**
-
-1.  **Satya**
-    Kesetiaan yang bersumber pada rasa jujur, baik terhadap Tuhan Yang Maha Esa, Diri pribadi dan keluarga maupun kepada sesama manusia.
-
-2.  **Adhi**
-    Kesempurnaan dalam bertugas dan yang berunsur utama pemilikan rasa tanggung jawab terhadap tuhan yang maha esa, keluarga dan sesama manusia.
-
-3.  **Wicaksana**
-    Bijaksana dalam tutur kata dan tingkah laku,khususnya dalam penerapan tugas dan kewenangan.
-"""
-    await interaction.response.send_message(tri_krama_text)
-
-
-# ======= EVENTS =======
-@bot.event
-async def on_ready():
-    print(f"✅ Bot aktif sebagai {bot.user}")
-    load_warn_data()
-    load_private_reminders()
-    load_role_reminders()
-    load_ticket_data()
-
-    # Tambahkan kembali persistent views untuk tombol tiket yang ada
-    guild = bot.get_guild(GUILD_ID)
-    if guild:
-        for channel_id, ticket_info in active_tickets.items():
-            channel = guild.get_channel(channel_id)
-            if channel and ticket_info.get("owner_id"):
-                owner = guild.get_member(ticket_info["owner_id"])
-                if owner:
-                    view = TicketButtons(owner, channel.id)
-                    # Jika tiket sudah diklaim, nonaktifkan tombol klaim di view awal
-                    if ticket_info.get("claimed_by"):
-                        for item in view.children:
-                            if item.custom_id == "claim_ticket":
-                                item.disabled = True
-                                break
-                    # Kirim pesan dengan tombol agar interaksi aktif kembali
-                    try:
-                        # Mencoba mencari pesan bot terakhir untuk diedit, jika tidak ada, kirim baru
-                        history = [msg async for msg in channel.history(limit=50) if msg.author == bot.user and msg.components]
-                        if history:
-                            await history[0].edit(view=view)
-                            print(f"Updated view in existing ticket channel {channel.name}")
-                        else:
-                            embed = discord.Embed(
-                                title="Tiket Bantuan (Aktif Kembali)",
-                                description=f"Halo <@{ticket_info['owner_id']}>! Tiket Anda aktif kembali.\n\n"
-                                            f"Seorang admin atau moderator akan segera membantu Anda.\n"
-                                            f"Gunakan tombol di bawah untuk mengelola tiket ini.",
-                                color=discord.Color.green()
-                            )
-                            await channel.send(embed=embed, view=view)
-                            print(f"Sent new view in existing ticket channel {channel.name}")
-                    except discord.Forbidden:
-                        print(f"Bot tidak memiliki izin send_messages/edit_messages di channel {channel.name} ({channel.id})")
-                else:
-                    print(f"Owner tiket {channel.name} ({ticket_info['owner_id']}) tidak ditemukan di guild, menghapus tiket dari data.")
-                    del active_tickets[channel.id]
-                    save_ticket_data()
-            else:
-                print(f"Channel tiket {channel_id} tidak ditemukan atau owner ID tidak ada, menghapus tiket dari data.")
-                if channel_id in active_tickets:
-                    del active_tickets[channel_id]
-                    save_ticket_data()
-
-
-    try:
-        synced = await tree.sync(guild=discord.Object(id=GUILD_ID))
-        print(f"Slash commands synced: {len(synced)}")
-    except Exception as e:
-        print(f"Gagal sync slash commands: {e}")
-
-    daily_reminder_task.start()
-    public_reminder_task.start()
-    close_inactive_tickets.start()
-    check_role_reminders.start()
-    check_private_reminders.start()
-
-@bot.event
-async def on_member_join(member):
-    if member.guild.id != GUILD_ID:
-        return
-
-    guild = member.guild
-
-    # Beri role "Unverified" secara otomatis saat bergabung
-    role_unverified = discord.utils.get(guild.roles, name=UNVERIFIED_ROLE_NAME)
-    if role_unverified:
+        nick_success = True
         try:
-            await member.add_roles(role_unverified)
-            print(f"Role '{UNVERIFIED_ROLE_NAME}' diberikan kepada {member.display_name}")
-        except discord.Forbidden:
-            print(f"Bot tidak memiliki izin untuk memberikan role '{UNVERIFIED_ROLE_NAME}' kepada {member}.")
-        except Exception as e:
-            print(f"Terjadi kesalahan saat memberikan role '{UNVERIFIED_ROLE_NAME}' kepada {member}: {e}")
-
-    # Kirim DM ke anggota baru
-    try:
-        await member.send(
-            f"Selamat datang di **{guild.name}**! "
-            f"Silakan verifikasi dengan mengirimkan nama asli kamu di channel <#{VERIFICATION_CHANNEL_ID}>."
-        )
-    except discord.Forbidden:
-        print(f"Gagal mengirim DM sambutan ke {member}.")
-
-    # Kirim pesan sambutan ke channel 'Selamat Datang'
-    welcome_channel = guild.get_channel(WELCOME_CHANNEL_ID)
-    if welcome_channel:
-        embed = discord.Embed(
-            title=f"Halo {member.display_name}! Selamat Datang di {guild.name} 👋",
-            description=(
-                f"Selamat datang di komunitas Prakom! Kami senang kamu sudah diverifikasi dan siap bergabung. 🎉\n\n"
-                f"Untuk memastikan pengalaman yang menyenangkan bagi semua, mohon perhatikan satu hal ini:\n"
-                f"1. **Pahami Aturan:** Pastikan kamu membaca dan memahami <#{ROLES_CHANNEL_ID}> agar kita semua bisa berinteraksi dengan nyaman dan positif.\n\n"
-                f"Kami tak sabar melihat kontribusimu Untuk Kejaksaan Republik Indonesia!"
-            ),
-            color=discord.Color.blue()
-        )
-        embed.set_thumbnail(url=member.display_avatar.url)
-        embed.set_footer(text="Ayo bangun komunitas yang aktif dan saling mendukung!")
-
-        await welcome_channel.send(f"Selamat datang {member.mention}!", embed=embed)
-
-
-@bot.event
-async def on_message(message):
-    if message.author.bot:
-        return
-
-    # Update inactive_tickets for active tickets
-    if message.channel.id in active_tickets:
-        inactive_tickets[message.channel.id] = datetime.now(WIB)
-
-    now = datetime.now(WIB)
-    timestamps = user_messages[message.author.id]
-    timestamps = [ts for ts in timestamps if (now - ts).seconds < SPAM_INTERVAL]
-    timestamps.append(now)
-    user_messages[message.author.id] = timestamps
-
-    if len(timestamps) > SPAM_THRESHOLD:
-        try:
-            await message.delete()
-            await message.channel.send(
-                f"{message.author.mention} spam terdeteksi.", delete_after=5)
-            mute_role = discord.utils.get(message.guild.roles, name=MUTE_ROLE_NAME)
-            if mute_role and mute_role not in message.author.roles:
-                await message.author.add_roles(mute_role)
-                await message.channel.send(
-                    f"{message.author.mention} telah dimute.", delete_after=5)
-                await asyncio.sleep(MUTE_DURATION)
-                if mute_role in message.author.roles:
-                    await message.author.remove_roles(mute_role)
+            await member.edit(nick=new_nick)
         except Exception:
-            pass
-        return
-
-    # XP System
-    user_xp[message.author.id] += 5
-    level = user_level[message.author.id]
-    next_level_xp = (level + 1) * 100
-    if user_xp[message.author.id] >= next_level_xp:
-        user_level[message.author.id] += 1
-        await message.channel.send(
-            f"🎉 {message.author.mention} naik level ke {user_level[message.author.id]}! Keep it up!"
-        )
-
-    # Verification Logic
-    if message.guild and message.guild.id == GUILD_ID and message.channel.id == VERIFICATION_CHANNEL_ID:
-        member = message.author
-        guild = message.guild
-        nama_baru = message.content.strip()
-
-        try:
-            await member.edit(nick=nama_baru)
-        except Exception as e:
-            await message.channel.send(f"❌ Tidak bisa ganti nickname: {e}", delete_after=10)
-            return
+            nick_success = False
 
         role_unverified = discord.utils.get(guild.roles, name=UNVERIFIED_ROLE_NAME)
         role_anggota = discord.utils.get(guild.roles, name=ANGGOTA_ROLE_NAME)
@@ -531,79 +378,455 @@ async def on_message(message):
                 await member.remove_roles(role_unverified)
             if role_anggota and role_anggota not in member.roles:
                 await member.add_roles(role_anggota)
-        except Exception as e:
-            await message.channel.send(f"❌ Tidak bisa mengatur role: {e}", delete_after=10)
+        except discord.Forbidden:
+            await interaction.followup.send("❌ Bot tidak memiliki izin `Manage Roles` yang cukup. Hubungi Admin.", ephemeral=True)
             return
 
-        channel_gender = guild.get_channel(GENDER_CHANNEL_ID)
-        if channel_gender:
-            pesan = await channel_gender.send(
-                f"{member.mention}, pilih jenis kelamin dengan reaksi berikut:\n👩 = {PRAKOM_CANTIK_ROLE_NAME}\n👨 = {PRAKOM_GANTENG_ROLE_NAME}"
-            )
-            await pesan.add_reaction("👩")
-            await pesan.add_reaction("👨")
-
-        try:
-            await member.send(
-                f"✅ Verifikasi berhasil. Nickname kamu: **{nama_baru}**. Sekarang silakan pilih gender di channel yang disebutkan."
-            )
-        except discord.Forbidden:
-            pass # DM tertutup
+        embed = discord.Embed(
+            title="🎉 Verifikasi Berhasil!",
+            description=(
+                f"Selamat bergabung di komunitas **Pranata Komputer Kejaksaan RI**, {member.mention}!\n\n"
+                f"📛 **Nama Server:** `{new_nick}`\n"
+                f"🏷️ **Status Role:** Diberikan role **{ANGGOTA_ROLE_NAME}**\n\n"
+                f"👉 **Langkah Selanjutnya:**\n"
+                f"Silakan kunjungi channel <#{GENDER_CHANNEL_ID}> untuk mengambil role identitas **Prakom Cantik** atau **Prakom Ganteng**."
+            ),
+            color=CLR_EMERALD,
+            timestamp=datetime.now(WIB)
+        )
+        embed.set_footer(text="Kejaksaan Republik Indonesia • Satya Adhi Wicaksana")
+        await interaction.followup.send(embed=embed, ephemeral=True)
 
         log_channel = guild.get_channel(LOG_CHANNEL_ID)
         if log_channel:
-            await log_channel.send(
-                f"🟢 {member} verifikasi dan ganti nama jadi **{nama_baru}**.")
+            log_embed = discord.Embed(
+                title="🟢 Anggota Terverifikasi",
+                color=CLR_ADHYAKSA_GREEN,
+                timestamp=datetime.now(WIB)
+            )
+            log_embed.set_thumbnail(url=member.display_avatar.url)
+            log_embed.add_field(name="👤 Akun", value=f"{member.mention}\n`{member.id}`", inline=True)
+            log_embed.add_field(name="📛 Nama & Gelar", value=f"**{nama}**", inline=True)
+            log_embed.add_field(name="🏛️ Satker / Jabatan", value=f"**{satker}**", inline=False)
+            log_embed.add_field(name="🏷️ Nickname Diterapkan", value=f"`{new_nick}`" if nick_success else "*Gagal diset (Hierarchy)*", inline=False)
+            log_embed.set_footer(text="Sistem Verifikasi Otomatis Prakom")
+            await log_channel.send(embed=log_embed)
 
-        await asyncio.sleep(5) # Beri waktu untuk bot mengirim pesan gender
+
+class VerificationView(View):
+    def __init__(self):
+        super().__init__(timeout=None)
+
+    @button(label="Verifikasi Sekarang", style=discord.ButtonStyle.success, emoji="📝", custom_id="btn_verify_modal")
+    async def verify_button_callback(self, interaction: discord.Interaction, btn: Button):
+        role_anggota = discord.utils.get(interaction.guild.roles, name=ANGGOTA_ROLE_NAME)
+        if role_anggota and role_anggota in interaction.user.roles:
+            embed = discord.Embed(
+                title="ℹ️ Sudah Terverifikasi",
+                description="Akun Anda sudah terdaftar dan memiliki akses penuh sebagai **Anggota**.",
+                color=CLR_CYAN
+            )
+            await interaction.response.send_message(embed=embed, ephemeral=True)
+            return
+        await interaction.response.send_modal(VerificationModal())
+
+    @button(label="Bantuan & Ketentuan", style=discord.ButtonStyle.secondary, emoji="❓", custom_id="btn_verify_help")
+    async def verify_help_callback(self, interaction: discord.Interaction, btn: Button):
+        embed = discord.Embed(
+            title="💡 Panduan Verifikasi Identitas",
+            description=(
+                "**Mengapa verifikasi diperlukan?**\n"
+                "Server ini adalah wadah komunikasi resmi Pranata Komputer di lingkungan Kejaksaan RI. "
+                "Verifikasi memastikan seluruh interaksi berlangsung tertib, profesional, dan akuntabel.\n\n"
+                "**Ketentuan Pengisian:**\n"
+                "• **Nama Lengkap:** Sertakan gelar akademik (contoh: *Ahmad Dani, S.Kom.*)\n"
+                "• **Satker:** Cantumkan Kejaksaan Negeri / Tinggi / Agung tempat Anda bertugas.\n\n"
+                "Jika mengalami kendala, silakan gunakan perintah `/create_ticket` untuk bantuan teknis."
+            ),
+            color=CLR_ADHYAKSA_GOLD
+        )
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+
+
+class GenderRoleView(View):
+    def __init__(self):
+        super().__init__(timeout=None)
+
+    @button(label="Prakom Cantik", style=discord.ButtonStyle.secondary, emoji="👩", custom_id="btn_gender_cantik")
+    async def cantik_callback(self, interaction: discord.Interaction, btn: Button):
+        await self.process_gender(interaction, PRAKOM_CANTIK_ROLE_NAME, PRAKOM_GANTENG_ROLE_NAME, "👩")
+
+    @button(label="Prakom Ganteng", style=discord.ButtonStyle.primary, emoji="👨", custom_id="btn_gender_ganteng")
+    async def ganteng_callback(self, interaction: discord.Interaction, btn: Button):
+        await self.process_gender(interaction, PRAKOM_GANTENG_ROLE_NAME, PRAKOM_CANTIK_ROLE_NAME, "👨")
+
+    async def process_gender(self, interaction: discord.Interaction, target_role_name: str, opposite_role_name: str, emoji: str):
+        guild = interaction.guild
+        member = interaction.user
+        target_role = discord.utils.get(guild.roles, name=target_role_name)
+        opposite_role = discord.utils.get(guild.roles, name=opposite_role_name)
+
+        if not target_role:
+            await interaction.response.send_message(f"❌ Role `{target_role_name}` belum dibuat di server.", ephemeral=True)
+            return
+
+        if target_role in member.roles:
+            embed = discord.Embed(
+                description=f"ℹ️ Anda saat ini sudah memiliki role **{emoji} {target_role_name}**.",
+                color=CLR_CYAN
+            )
+            await interaction.response.send_message(embed=embed, ephemeral=True)
+            return
+
         try:
-            await message.delete() # Hapus pesan verifikasi pengguna
-        except:
-            pass # Pesan sudah terhapus atau bot tidak punya izin
+            if opposite_role and opposite_role in member.roles:
+                await member.remove_roles(opposite_role)
+            await member.add_roles(target_role)
 
-    await bot.process_commands(message)
-
-@bot.event
-async def on_reaction_add(reaction, user):
-    if user.bot:
-        return
-    if reaction.message.channel.id != GENDER_CHANNEL_ID:
-        return
-
-    guild = reaction.message.guild
-    role_to_add = None
-
-    if reaction.emoji == "👩":
-        role_to_add = discord.utils.get(guild.roles, name=PRAKOM_CANTIK_ROLE_NAME)
-    elif reaction.emoji == "👨":
-        role_to_add = discord.utils.get(guild.roles, name=PRAKOM_GANTENG_ROLE_NAME)
-    else:
-        return # Reaksi tidak relevan
-
-    if role_to_add:
-        try:
-            await user.add_roles(role_to_add)
-            await reaction.message.channel.send(f"{user.mention} sudah memilih **{role_to_add.name}**.", delete_after=10)
-
-            # Hapus role Anggota setelah memilih gender
-            role_anggota = discord.utils.get(guild.roles, name=ANGGOTA_ROLE_NAME)
-            if role_anggota and role_anggota in user.roles:
-                await user.remove_roles(role_anggota)
-                print(f"Role '{ANGGOTA_ROLE_NAME}' dihapus dari {user.display_name}")
-
-            # Hapus reaksi pengguna agar bisa memilih lagi jika salah
-            await reaction.remove(user)
-
+            embed = discord.Embed(
+                title="✨ Role Berhasil Disematkan",
+                description=f"Selamat! Anda kini telah memiliki role **{emoji} {target_role_name}**.",
+                color=CLR_PURPLE if "Cantik" in target_role_name else CLR_NAVY
+            )
+            await interaction.response.send_message(embed=embed, ephemeral=True)
         except discord.Forbidden:
-            print(f"Bot tidak memiliki izin untuk mengelola role untuk {user}.")
-            await reaction.message.channel.send(f"❌ Saya tidak memiliki izin untuk mengatur role Anda.", delete_after=10)
+            await interaction.response.send_message("❌ Bot tidak memiliki izin untuk mengelola role Anda.", ephemeral=True)
+
+
+class PersistentTicketButtons(View):
+    def __init__(self):
+        super().__init__(timeout=None)
+
+    @button(label="Tutup Tiket", style=discord.ButtonStyle.danger, emoji="🔒", custom_id="ticket_btn_close")
+    async def close_callback(self, interaction: discord.Interaction, btn: Button):
+        channel = interaction.channel
+        ticket_info = active_tickets.get(channel.id)
+
+        admin_role = discord.utils.get(interaction.guild.roles, name=ADMIN_PRAKOM_ROLE)
+        is_admin = (
+            interaction.user.id == interaction.guild.owner_id or
+            interaction.user.guild_permissions.administrator or
+            (admin_role and admin_role in interaction.user.roles)
+        )
+        is_owner = (ticket_info and ticket_info.get("owner_id") == interaction.user.id)
+
+        if not (is_admin or is_owner):
+            await interaction.response.send_message("❌ Hanya pemilik tiket atau Admin Prakom yang dapat menutup tiket ini.", ephemeral=True)
+            return
+
+        closing_embed = discord.Embed(
+            title="🔒 Menutup Tiket Bantuan",
+            description="Tiket ini sedang diarsipkan. Seluruh log percakapan akan diekspor dan channel akan dihapus dalam 5 detik...",
+            color=CLR_CRIMSON
+        )
+        await interaction.response.send_message(embed=closing_embed)
+        await asyncio.sleep(5)
+
+        transcript_bytes = None
+        try:
+            transcript_bytes = await generate_ticket_transcript(channel)
         except Exception as e:
-            print(f"Terjadi kesalahan saat mengatur role untuk {user}: {e}")
-            await reaction.message.channel.send(f"❌ Terjadi kesalahan saat mengatur role Anda.", delete_after=10)
+            print(f"Gagal generate transcript: {e}")
+
+        owner_id = ticket_info.get("owner_id") if ticket_info else None
+        if channel.id in active_tickets:
+            del active_tickets[channel.id]
+            save_ticket_data()
+        if channel.id in inactive_tickets:
+            del inactive_tickets[channel.id]
+
+        log_admin_channel = interaction.guild.get_channel(LOGADMIN_CHANNEL_ID)
+        if log_admin_channel:
+            owner_mention = f"<@{owner_id}>" if owner_id else "Tidak Diketahui"
+            embed = discord.Embed(
+                title="📁 Arsip Tiket Bantuan Ditutup",
+                color=CLR_DARK,
+                timestamp=datetime.now(WIB)
+            )
+            embed.add_field(name="🏷️ Nama Tiket", value=f"`{channel.name}`", inline=True)
+            embed.add_field(name="👤 Pembuat", value=owner_mention, inline=True)
+            embed.add_field(name="🛡️ Ditutup Oleh", value=interaction.user.mention, inline=True)
+            embed.set_footer(text="Transkrip percakapan terlampir di bawah")
+
+            file = None
+            if transcript_bytes:
+                file = discord.File(transcript_bytes, filename=f"transkrip-{channel.name}.txt")
+            await log_admin_channel.send(embed=embed, file=file)
+
+        try:
+            await channel.delete(reason=f"Tiket ditutup oleh {interaction.user.name}")
+        except Exception as e:
+            print(f"Gagal menghapus channel tiket: {e}")
+
+    @button(label="Klaim Tiket", style=discord.ButtonStyle.primary, emoji="🙋", custom_id="ticket_btn_claim")
+    async def claim_callback(self, interaction: discord.Interaction, btn: Button):
+        admin_role = discord.utils.get(interaction.guild.roles, name=ADMIN_PRAKOM_ROLE)
+        is_admin = (
+            interaction.user.id == interaction.guild.owner_id or
+            interaction.user.guild_permissions.administrator or
+            (admin_role and admin_role in interaction.user.roles)
+        )
+        if not is_admin:
+            await interaction.response.send_message("❌ Hanya Admin Prakom yang dapat mengklaim tiket.", ephemeral=True)
+            return
+
+        channel = interaction.channel
+        if channel.id not in active_tickets:
+            await interaction.response.send_message("❗ Data tiket tidak ditemukan atau sudah ditutup.", ephemeral=True)
+            return
+
+        current_claim = active_tickets[channel.id].get("claimed_by")
+        if current_claim:
+            claimed_user = interaction.guild.get_member(current_claim)
+            mention_str = claimed_user.mention if claimed_user else f"<@{current_claim}>"
+            await interaction.response.send_message(f"❗ Tiket ini sudah diklaim oleh {mention_str}.", ephemeral=True)
+            return
+
+        active_tickets[channel.id]["claimed_by"] = interaction.user.id
+        save_ticket_data()
+
+        try:
+            await channel.set_permissions(interaction.user, read_messages=True, send_messages=True, attach_files=True)
+        except Exception:
+            pass
+
+        claim_embed = discord.Embed(
+            title="➡️ Tiket Telah Diklaim",
+            description=f"Tiket ini sekarang sedang ditangani secara langsung oleh {interaction.user.mention}.",
+            color=CLR_CYAN
+        )
+        await interaction.response.send_message(embed=claim_embed)
+
+        log_admin_channel = interaction.guild.get_channel(LOGADMIN_CHANNEL_ID)
+        if log_admin_channel:
+            await log_admin_channel.send(f"➡️ **Tiket Diklaim:** Tiket `{channel.name}` telah diklaim oleh {interaction.user.mention}.")
+
+
+# ======= VIEW MENU HELP DINAMIS (SELECT DROPDOWN) =======
+class HelpSelect(Select):
+    def __init__(self, is_admin: bool):
+        options = [
+            discord.SelectOption(
+                label="Ringkasan & Beranda",
+                value="home",
+                emoji="🏛️",
+                description="Tentang Bot Prakom dan informasi umum"
+            ),
+            discord.SelectOption(
+                label="Anggota & Komunitas",
+                value="community",
+                emoji="👥",
+                description="Perintah level/rank, profil, dan leaderboard"
+            ),
+            discord.SelectOption(
+                label="Layanan Tiket Bantuan",
+                value="tickets",
+                emoji="🎫",
+                description="Panduan membuat dan mengelola tiket konsultasi"
+            ),
+            discord.SelectOption(
+                label="Sistem Pengingat",
+                value="reminders",
+                emoji="⏰",
+                description="Pengingat pribadi, publik, dan role"
+            ),
+            discord.SelectOption(
+                label="Portal & Adhyaksa",
+                value="adhyaksa",
+                emoji="⚖️",
+                description="Mars Adhyaksa, Tri Krama, dan tautan kedinasan"
+            ),
+        ]
+        if is_admin:
+            options.append(
+                discord.SelectOption(
+                    label="Panel Moderasi (Admin)",
+                    value="admin",
+                    emoji="🛡️",
+                    description="Perintah moderasi, setup panel, dan pengumuman"
+                )
+            )
+        super().__init__(placeholder="🔍 Pilih Kategori Perintah...", min_values=1, max_values=1, options=options)
+
+    async def callback(self, interaction: discord.Interaction):
+        choice = self.values[0]
+
+        if choice == "home":
+            embed = discord.Embed(
+                title="🏛️ Pusat Bantuan Bot Prakom Kejaksaan RI",
+                description=(
+                    "Selamat datang di sistem asisten virtual resmi komunitas **Pranata Komputer Kejaksaan RI**.\n\n"
+                    "Gunakan menu pilihan dropdown di bawah untuk menjelajahi seluruh modul dan fungsi perintah bot.\n\n"
+                    "**Kategori Perintah:**\n"
+                    "• 👥 **Anggota & Komunitas:** Sistem level, XP, dan papan peringkat.\n"
+                    "• 🎫 **Tiket Bantuan:** Konsultasi kendala teknis dan administrasi.\n"
+                    "• ⏰ **Pengingat:** Pengingat agenda dan tenggat waktu kegiatan.\n"
+                    "• ⚖️ **Portal & Adhyaksa:** Tautan cepat layanan BKN & Mars Adhyaksa.\n"
+                    "• 🛡️ **Moderasi (Khusus Admin):** Pengelolaan keamanan dan ketertiban server."
+                ),
+                color=CLR_ADHYAKSA_GOLD
+            )
+            embed.set_footer(text="Kejaksaan RI • Satya Adhi Wicaksana")
+
+        elif choice == "community":
+            embed = discord.Embed(
+                title="👥 Perintah Anggota & Aktivitas Komunitas",
+                description="Tingkatkan aktivitas positif Anda untuk menaikkan level dan membuka gelar jenjang Prakom!",
+                color=CLR_CYAN
+            )
+            embed.add_field(
+                name="`/rank [member]`",
+                value="Menampilkan kartu profil aktivitas, perolehan XP, level saat ini, dan progress bar visual.",
+                inline=False
+            )
+            embed.add_field(
+                name="`/leaderboard`",
+                value="Menampilkan papan peringkat 10 besar anggota teraktif di server.",
+                inline=False
+            )
+            embed.add_field(
+                name="`/ping`",
+                value="Memeriksa latensi jaringan gateway Discord dan waktu aktif bot (uptime).",
+                inline=False
+            )
+
+        elif choice == "tickets":
+            embed = discord.Embed(
+                title="🎫 Layanan Tiket Konsultasi Teknis",
+                description="Media komunikasi privat antara anggota dengan tim Admin/Moderator Prakom.",
+                color=CLR_EMERALD
+            )
+            embed.add_field(
+                name="`/create_ticket`",
+                value="Membuka channel tiket bantuan khusus secara privat. Tim admin akan segera merespon dan mendampingi Anda.",
+                inline=False
+            )
+            embed.add_field(
+                name="🔒 Fitur Auto-Archive",
+                value="Tiket yang tidak memiliki aktivitas percakapan selama 3 jam akan otomatis diarsipkan dan ditutup demi kerapian server.",
+                inline=False
+            )
+
+        elif choice == "reminders":
+            embed = discord.Embed(
+                title="⏰ Sistem Pengingat Jadwal & Tugas",
+                description="Pastikan tidak ada agenda, rapat dinas, atau tenggat pelaporan SKP yang terlewatkan.",
+                color=CLR_AMBER
+            )
+            embed.add_field(
+                name="`/set_reminder [tipe] [waktu] [pesan]`",
+                value=(
+                    "Membuat pengingat otomatis:\n"
+                    "• `pribadi` : Dikirim via DM bot pada waktu yang ditentukan.\n"
+                    "• `publik`  : Dikirim setiap hari pada jam tertentu di channel.\n"
+                    "• `sekali`  : Dikirim satu kali pada tanggal & jam tertentu di channel.\n"
+                    "• `role`    : Men-tag role tertentu pada tanggal & jam terjadwal."
+                ),
+                inline=False
+            )
+            embed.add_field(
+                name="`/list_reminders`",
+                value="Melihat seluruh daftar pengingat aktif Anda beserta ID pengingat.",
+                inline=False
+            )
+            embed.add_field(
+                name="`/cancel_reminder [reminder_id]`",
+                value="Membatalkan pengingat yang telah dibuat berdasarkan ID-nya.",
+                inline=False
+            )
+
+        elif choice == "adhyaksa":
+            embed = discord.Embed(
+                title="⚖️ Portal Kedinasan & Nilai Luhur Adhyaksa",
+                description="Tautan penting dan pedoman moral bagi seluruh Insan Kejaksaan RI:",
+                color=CLR_ADHYAKSA_GREEN
+            )
+            embed.add_field(
+                name="`/prakom_portal`",
+                value="Akses cepat satu pintu ke MOLA BKN, SIASN/MyASN, E-Kinerja, dan JDIH Kejaksaan RI.",
+                inline=False
+            )
+            embed.add_field(
+                name="`/mars_adhyaksa`",
+                value="Menampilkan teks lirik resmi Mars Adhyaksa.",
+                inline=False
+            )
+            embed.add_field(
+                name="`/tri_karma_adhyaksa`",
+                value="Menampilkan butir pedoman kehormatan Tri Krama Adhyaksa (Satya, Adhi, Wicaksana).",
+                inline=False
+            )
+
+        elif choice == "admin":
+            embed = discord.Embed(
+                title="🛡️ Panel Perintah Moderasi & Manajemen Server",
+                description="*Perintah di bawah ini hanya dapat dieksekusi oleh Administrator & Admin Prakom:*",
+                color=CLR_CRIMSON
+            )
+            embed.add_field(
+                name="⚙️ Inisialisasi Panel",
+                value=(
+                    "`/setup_verification` - Kirim panel verifikasi interaktif ber-tombol\n"
+                    "`/setup_gender` - Kirim panel pemilihan role Prakom Cantik/Ganteng"
+                ),
+                inline=False
+            )
+            embed.add_field(
+                name="🔨 Penindakan & Keamanan",
+                value=(
+                    "`/warn` | `/warnings` | `/clear_warnings` - Manajemen sanksi peringatan\n"
+                    "`/mute` | `/unmute` - Timeout anggota sementara (native Discord)\n"
+                    "`/kick` | `/ban` | `/unban` - Pengeluaran & pemblokiran anggota\n"
+                    "`/clear [jumlah]` - Hapus pesan massal (maks. 100)"
+                ),
+                inline=False
+            )
+            embed.add_field(
+                name="📢 Pengumuman Resmi",
+                value=(
+                    "`/announcement` - Kirim pengumuman resmi ber-embed emas\n"
+                    "`/scheduled_announcement` - Jadwalkan pengumuman otomatis"
+                ),
+                inline=False
+            )
+
+        await interaction.response.edit_message(embed=embed, view=self.view)
+
+
+class HelpView(View):
+    def __init__(self, is_admin: bool):
+        super().__init__(timeout=180)
+        self.add_item(HelpSelect(is_admin))
+
+
+# ======= VIEW PORTAL DENGAN LINK BUTTONS =======
+class PortalLinksView(View):
+    def __init__(self):
+        super().__init__(timeout=None)
+        self.add_item(Button(label="MOLA BKN", url="https://mola.bkn.go.id/", emoji="🔍", style=discord.ButtonStyle.link))
+        self.add_item(Button(label="MyASN / SIASN", url="https://myasn.bkn.go.id/", emoji="👤", style=discord.ButtonStyle.link))
+        self.add_item(Button(label="E-Kinerja BKN", url="https://kinerja.bkn.go.id/", emoji="📊", style=discord.ButtonStyle.link))
+        self.add_item(Button(label="Kejaksaan RI", url="https://www.kejaksaan.go.id/", emoji="⚖️", style=discord.ButtonStyle.link))
+        self.add_item(Button(label="JDIH Kejaksaan", url="https://jdih.kejaksaan.go.id/", emoji="📜", style=discord.ButtonStyle.link))
+
+
+# ======= BOT CLASS DENGAN SETUP HOOK PERSISTEN =======
+class PrakomBot(commands.Bot):
+    def __init__(self):
+        super().__init__(command_prefix="!", intents=intents)
+
+    async def setup_hook(self):
+        self.add_view(VerificationView())
+        self.add_view(GenderRoleView())
+        self.add_view(PersistentTicketButtons())
+        print("✅ Persistent Views (Verifikasi, Gender, Tiket) berhasil diinisialisasi.")
+
+bot = PrakomBot()
+tree = bot.tree
 
 # ======= BACKGROUND TASKS =======
 
-@tasks.loop(minutes=30) # Cek setiap 30 menit
+@tasks.loop(minutes=30)
 async def close_inactive_tickets():
     guild = bot.get_guild(GUILD_ID)
     if not guild:
@@ -611,141 +834,611 @@ async def close_inactive_tickets():
 
     current_time = datetime.now(WIB)
     channels_to_close = []
-    log_admin_channel = guild.get_channel(LOGADMIN_CHANNEL_ID)
 
-    for channel_id, last_activity_time in list(inactive_tickets.items()):
-        # Cek jika tiket tidak aktif selama 3 jam (3 * 3600 detik)
-        if (current_time - last_activity_time).total_seconds() > (3 * 3600):
+    for channel_id, last_activity in list(inactive_tickets.items()):
+        if (current_time - last_activity).total_seconds() > (3 * 3600):
             channel = guild.get_channel(channel_id)
-            # Pastikan channel ada dan berada di kategori tiket
             if channel and channel.category and channel.category.name == TICKET_CATEGORY_NAME:
                 channels_to_close.append(channel)
 
     for channel in channels_to_close:
         try:
             owner_id = active_tickets.get(channel.id, {}).get("owner_id")
-            owner_mention = f"<@{owner_id}>" if owner_id else "pengguna tidak diketahui"
-            await channel.send(f"Tiket ini otomatis ditutup karena tidak ada aktivitas selama 3 jam.")
-            if log_admin_channel:
-                await log_admin_channel.send(f"🕒 **Tiket Otomatis Ditutup:** Tiket `{channel.name}` (dibuat oleh {owner_mention}) ditutup karena tidak aktif selama 3 jam.")
+            owner_mention = f"<@{owner_id}>" if owner_id else "Pengguna Tidak Diketahui"
 
-            # Hapus dari active_tickets dan inactive_tickets
+            auto_close_embed = discord.Embed(
+                title="🕒 Tiket Ditutup Otomatis",
+                description="Tiket ini otomatis diarsipkan karena tidak ada aktivitas selama 3 jam.",
+                color=CLR_CRIMSON
+            )
+            await channel.send(embed=auto_close_embed)
+
+            transcript_bytes = None
+            try:
+                transcript_bytes = await generate_ticket_transcript(channel)
+            except Exception:
+                pass
+
             if channel.id in active_tickets:
                 del active_tickets[channel.id]
                 save_ticket_data()
             if channel.id in inactive_tickets:
                 del inactive_tickets[channel.id]
 
-            await asyncio.sleep(5) # Beri waktu pesan terkirim
-            await channel.delete()
-        except discord.Forbidden:
-            print(f"Bot tidak memiliki izin untuk menutup channel {channel.name} secara otomatis.")
+            log_admin_channel = guild.get_channel(LOGADMIN_CHANNEL_ID)
+            if log_admin_channel:
+                embed = discord.Embed(
+                    title="🕒 Arsip Tiket (Inaktivitas 3 Jam)",
+                    color=CLR_DARK,
+                    timestamp=datetime.now(WIB)
+                )
+                embed.add_field(name="🏷️ Tiket", value=f"`{channel.name}`", inline=True)
+                embed.add_field(name="👤 Pembuat", value=owner_mention, inline=True)
+                file = None
+                if transcript_bytes:
+                    file = discord.File(transcript_bytes, filename=f"transkrip-auto-{channel.name}.txt")
+                await log_admin_channel.send(embed=embed, file=file)
+
+            await asyncio.sleep(5)
+            await channel.delete(reason="Inaktivitas 3 jam")
         except Exception as e:
             print(f"Gagal menutup tiket otomatis {channel.name}: {e}")
 
 @tasks.loop(minutes=1)
 async def public_reminder_task():
-    now_hour_minute = datetime.now(WIB).strftime("%H:%M")
-    for channel_id, reminders_list in list(public_reminders.items()):
+    now_hm = datetime.now(WIB).strftime("%H:%M")
+    for channel_id, reminders in list(public_reminders_data.items()):
         channel = bot.get_channel(channel_id)
         if channel:
-            # Iterasi salinan list untuk menghindari masalah saat menghapus elemen
-            for reminder_time, message in list(reminders_list):
-                if now_hour_minute == reminder_time:
+            for rem in reminders:
+                if rem.get("time") == now_hm:
+                    embed = discord.Embed(
+                        title="🔔 Pengingat Publik Terjadwal",
+                        description=rem['message'],
+                        color=CLR_AMBER,
+                        timestamp=datetime.now(WIB)
+                    )
+                    embed.set_footer(text=f"Jadwal Rutin: Pukul {rem['time']} WIB")
                     try:
-                        await channel.send(f"🔔 **Pengingat Publik:** {message}")
-                    except discord.Forbidden:
-                        print(f"Bot tidak memiliki izin kirim pesan di channel {channel.name} untuk pengingat publik.")
-                    # Jika Anda ingin reminder publik berulang setiap hari, jangan hapus di sini.
-                    # Jika hanya ingin sekali, Anda bisa menambahkan logika penghapusan.
+                        await channel.send(embed=embed)
+                    except Exception as e:
+                        print(f"Error mengirim public reminder: {e}")
 
 @tasks.loop(minutes=1)
 async def check_private_reminders():
     now = datetime.now(WIB)
-    reminders_to_remove_private = []
+    modified = False
 
-    # Check for private reminders
     for user_id_str, reminders in list(private_reminders_data.items()):
         user = bot.get_user(int(user_id_str))
-        if user:
-            for rem in list(reminders): # Iterasi salinan untuk modifikasi saat loop
-                if rem["time"] <= now:
-                    try:
-                        await user.send(f"🔔 **Pengingat Pribadi:** {rem['message']}")
-                    except discord.Forbidden:
-                        print(f"Gagal mengirim DM ke {user.name} ({user_id_str}) untuk pengingat pribadi.")
-                    reminders.remove(rem) # Hapus setelah terkirim
-            if not reminders:
-                reminders_to_remove_private.append(user_id_str)
+        if not user:
+            try:
+                user = await bot.fetch_user(int(user_id_str))
+            except Exception:
+                user = None
 
-    for user_id_str in reminders_to_remove_private:
-        del private_reminders_data[user_id_str]
-    save_private_reminders()
+        to_remove = []
+        for rem in list(reminders):
+            rem_time = rem["time"]
+            if isinstance(rem_time, str):
+                rem_time = datetime.fromisoformat(rem_time)
+                if rem_time.tzinfo is None:
+                    rem_time = rem_time.replace(tzinfo=WIB)
+                rem["time"] = rem_time
+
+            if rem_time <= now:
+                if user:
+                    embed = discord.Embed(
+                        title="🔔 Pengingat Pribadi",
+                        description=rem['message'],
+                        color=CLR_CYAN,
+                        timestamp=now
+                    )
+                    embed.set_footer(text="Komunitas Prakom Kejaksaan RI")
+                    try:
+                        await user.send(embed=embed)
+                    except discord.Forbidden:
+                        pass
+                to_remove.append(rem)
+                modified = True
+
+        for item in to_remove:
+            if item in reminders:
+                reminders.remove(item)
+
+        if not reminders:
+            if user_id_str in private_reminders_data:
+                del private_reminders_data[user_id_str]
+                modified = True
+
+    if modified:
+        save_private_reminders()
 
 @tasks.loop(minutes=1)
-async def check_role_reminders(): # Menggabungkan scheduled_announcement dan sekali_channel
+async def check_role_reminders():
     now = datetime.now(WIB)
-    reminders_to_remove_role = []
+    indices_to_remove = []
 
     for i, rem in enumerate(role_reminders):
-        if rem["waktu"] <= now:
-            if rem.get("tipe") == "sekali_channel":
-                channel = bot.get_channel(rem["channel_id"])
-                if channel:
-                    try:
-                        await channel.send(f"🔔 **Pengingat:** {rem['pesan']}")
-                    except discord.Forbidden:
-                        print(f"Gagal mengirim pengingat ke channel {channel.name}.")
-                reminders_to_remove_role.append(i)
-            elif rem.get("tipe") == "scheduled_announcement":
-                channel = bot.get_channel(rem["channel_id"])
-                if channel:
-                    try:
-                        await channel.send(f"📢 **Pengumuman Terjadwal:**\n\n{rem['pesan']}")
-                    except discord.Forbidden:
-                        print(f"Gagal mengirim pengumuman terjadwal ke channel {channel.name}.")
-                reminders_to_remove_role.append(i)
-            elif rem.get("tipe") == "role": # Logika untuk pengingat role
-                guild = bot.get_guild(GUILD_ID)
-                if guild:
-                    role_target = discord.utils.get(guild.roles, name=rem["role_name"])
-                    channel = bot.get_channel(rem["channel_id"])
-                    if role_target and channel:
-                        try:
-                            await channel.send(f"🔔 **Pengingat untuk {role_target.mention}:** {rem['pesan']}")
-                        except discord.Forbidden:
-                            print(f"Gagal mengirim pengingat ke channel {channel.name} untuk role {role_target.name}.")
-                reminders_to_remove_role.append(i)
+        rem_time = rem["waktu"]
+        if isinstance(rem_time, str):
+            rem_time = datetime.fromisoformat(rem_time)
+            if rem_time.tzinfo is None:
+                rem_time = rem_time.replace(tzinfo=WIB)
+            rem["waktu"] = rem_time
 
-    # Hapus reminder secara terbalik untuk menghindari masalah indeks
-    for i in sorted(reminders_to_remove_role, reverse=True):
-        del role_reminders[i]
-    save_role_reminders()
+        if rem_time <= now:
+            tipe = rem.get("tipe")
+            channel = bot.get_channel(rem["channel_id"])
+            if channel:
+                try:
+                    if tipe == "sekali_channel":
+                        embed = discord.Embed(
+                            title="🔔 Pengingat Terjadwal",
+                            description=rem['pesan'],
+                            color=CLR_AMBER,
+                            timestamp=now
+                        )
+                        await channel.send(embed=embed)
+                    elif tipe == "scheduled_announcement":
+                        embed = discord.Embed(
+                            title="📢 PENGUMUMAN RESMI TERJADWAL",
+                            description=rem['pesan'],
+                            color=CLR_ADHYAKSA_GOLD,
+                            timestamp=now
+                        )
+                        embed.set_footer(text="Kejaksaan Republik Indonesia")
+                        await channel.send(embed=embed)
+                    elif tipe == "role":
+                        guild = bot.get_guild(GUILD_ID)
+                        if guild:
+                            role_target = discord.utils.get(guild.roles, name=rem.get("role_name"))
+                            mention = role_target.mention if role_target else f"@{rem.get('role_name')}"
+                            embed = discord.Embed(
+                                title=f"🔔 Pengingat Khusus",
+                                description=f"Perhatian untuk {mention}:\n\n{rem['pesan']}",
+                                color=CLR_NAVY,
+                                timestamp=now
+                            )
+                            await channel.send(content=mention, embed=embed)
+                except Exception as e:
+                    print(f"Error role reminder: {e}")
+            indices_to_remove.append(i)
 
+    if indices_to_remove:
+        for i in sorted(indices_to_remove, reverse=True):
+            del role_reminders[i]
+        save_role_reminders()
 
-@tasks.loop(time=time(hour=7, minute=0, tzinfo=WIB)) # Setiap jam 7 pagi WIB
+@tasks.loop(time=time(hour=7, minute=0, tzinfo=WIB))
 async def daily_reminder_task():
     channel = bot.get_channel(DAILY_ANNOUNCEMENT_CHANNEL_ID)
     if channel:
         quote = random.choice(DAILY_QUOTES)
-        announcement = DAILY_ANNOUNCEMENT_TEMPLATE + f"\n\n✨ Motivasi hari ini: \"{quote}\""
+        embed = discord.Embed(
+            title="🌅 Selamat Pagi Insan Adhyaksa! 🌞",
+            description=(
+                "Awali hari dengan semangat profesionalisme dan integritas tinggi.\n\n"
+                "**📌 Agenda & Pengingat Pagi Ini:**\n"
+                "• Lakukan absensi pagi sesuai ketentuan satker masing-masing.\n"
+                "• Cek dashboard **MOLA BKN** untuk pemutakhiran layanan kepegawaian.\n"
+                "• Siapkan laporan kinerja harian pada aplikasi **E-Kinerja BKN**.\n"
+                "• Jaga kesehatan dan utamakan keselamatan kerja."
+            ),
+            color=CLR_ADHYAKSA_GOLD,
+            timestamp=datetime.now(WIB)
+        )
+        embed.add_field(
+            name="✨ Motivasi Adhyaksa Hari Ini",
+            value=f"*{quote}*",
+            inline=False
+        )
+        embed.set_footer(text="Kejaksaan Republik Indonesia • Satya Adhi Wicaksana")
         try:
-            await channel.send(announcement)
+            await channel.send(embed=embed)
         except discord.Forbidden:
-            print(f"Bot tidak memiliki izin kirim pesan di channel pengumuman harian {channel.name}.")
-    else:
-        print(f"Channel pengumuman harian dengan ID {DAILY_ANNOUNCEMENT_CHANNEL_ID} tidak ditemukan.")
+            pass
 
+# ======= EVENTS =======
 
-# ======= SLASH COMMANDS =======
+@bot.event
+async def on_ready():
+    print(f"✅ Bot Prakom aktif sebagai {bot.user} (ID: {bot.user.id})")
+    load_warn_data()
+    load_private_reminders()
+    load_public_reminders()
+    load_role_reminders()
+    load_ticket_data()
+    load_level_data()
 
-@tree.command(name="set_reminder", description="Set reminder: pribadi (DM), publik (channel), sekali (channel), atau role (channel)", guild=discord.Object(id=GUILD_ID))
+    try:
+        guild_obj = discord.Object(id=GUILD_ID)
+        synced = await tree.sync(guild=guild_obj)
+        print(f"Slash commands synced: {len(synced)}")
+    except Exception as e:
+        print(f"Gagal sync slash commands: {e}")
+
+    loop_tasks = [
+        daily_reminder_task,
+        public_reminder_task,
+        close_inactive_tickets,
+        check_role_reminders,
+        check_private_reminders
+    ]
+    for t in loop_tasks:
+        if not t.is_running():
+            t.start()
+
+@bot.event
+async def on_member_join(member: discord.Member):
+    if member.guild.id != GUILD_ID:
+        return
+
+    guild = member.guild
+
+    role_unverified = discord.utils.get(guild.roles, name=UNVERIFIED_ROLE_NAME)
+    if role_unverified:
+        try:
+            await member.add_roles(role_unverified)
+        except Exception:
+            pass
+
+    try:
+        dm_embed = discord.Embed(
+            title=f"Selamat Datang di {guild.name}! 🏛️",
+            description=(
+                f"Halo {member.mention}! Selamat datang di komunitas resmi **Pranata Komputer Kejaksaan RI**.\n\n"
+                f"Agar dapat berinteraksi dan mengakses seluruh channel, silakan buka channel <#{VERIFICATION_CHANNEL_ID}> "
+                f"dan klik tombol **'Verifikasi Sekarang'** untuk mengisi nama dan unit kerja Anda."
+            ),
+            color=CLR_ADHYAKSA_GREEN
+        )
+        dm_embed.set_footer(text="Kejaksaan Republik Indonesia • Satya Adhi Wicaksana")
+        await member.send(embed=dm_embed)
+    except discord.Forbidden:
+        pass
+
+    welcome_channel = guild.get_channel(WELCOME_CHANNEL_ID)
+    if welcome_channel:
+        embed = discord.Embed(
+            title=f"👋 Selamat Datang, {member.display_name}!",
+            description=(
+                f"Selamat datang di server komunitas **Pranata Komputer Kejaksaan RI**! 🎉\n\n"
+                f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                f"**📌 3 Langkah Awal Bergabung:**\n"
+                f"**1.** Lakukan verifikasi identitas resmi di <#{VERIFICATION_CHANNEL_ID}>.\n"
+                f"**2.** Ambil peran gender identitas Anda di <#{GENDER_CHANNEL_ID}>.\n"
+                f"**3.** Pahami tata tertib dan etika komunitas di <#{ROLES_CHANNEL_ID}>.\n"
+                f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+                f"*Mari berkontribusi nyata demi kemajuan teknologi informasi Korps Adhyaksa!*"
+            ),
+            color=CLR_NAVY,
+            timestamp=datetime.now(WIB)
+        )
+        embed.set_thumbnail(url=member.display_avatar.url)
+        embed.set_footer(text="Kejaksaan Republik Indonesia • Satya Adhi Wicaksana")
+        await welcome_channel.send(content=f"Selamat datang {member.mention}!", embed=embed)
+
+@bot.event
+async def on_message(message: discord.Message):
+    if message.author.bot or not message.guild:
+        return
+
+    if message.channel.id in active_tickets:
+        inactive_tickets[message.channel.id] = datetime.now(WIB)
+
+    now = datetime.now(WIB)
+
+    # Anti-Spam
+    timestamps = user_messages[message.author.id]
+    timestamps = [ts for ts in timestamps if (now - ts).total_seconds() < SPAM_INTERVAL]
+    timestamps.append(now)
+    user_messages[message.author.id] = timestamps
+
+    if len(user_messages) > 300:
+        stale = [uid for uid, tss in user_messages.items() if not tss or (now - tss[-1]).total_seconds() > 300]
+        for uid in stale:
+            del user_messages[uid]
+
+    if len(timestamps) > SPAM_THRESHOLD:
+        try:
+            await message.delete()
+            warn_embed = discord.Embed(
+                description=f"⚠️ {message.author.mention}, aktivitas pengiriman pesan terlalu cepat! Anda dimute sementara.",
+                color=CLR_CRIMSON
+            )
+            await message.channel.send(embed=warn_embed, delete_after=5)
+            await message.author.timeout(timedelta(seconds=MUTE_DURATION), reason="Anti-Spam otomatis")
+        except Exception:
+            pass
+        return
+
+    # XP & Leveling
+    user_id_str = str(message.author.id)
+    current_time_sec = now.timestamp()
+    user_data = level_data.get(user_id_str, {"xp": 0, "level": 0, "last_xp_time": 0})
+
+    if current_time_sec - user_data.get("last_xp_time", 0) >= XP_COOLDOWN:
+        user_data["last_xp_time"] = current_time_sec
+        user_data["xp"] = user_data.get("xp", 0) + 15
+        current_level = user_data.get("level", 0)
+        next_level_xp = (current_level + 1) * 100
+
+        if user_data["xp"] >= next_level_xp:
+            user_data["level"] = current_level + 1
+            tier_title, tier_role = get_prakom_tier(user_data["level"])
+            lvl_embed = discord.Embed(
+                title="⭐ Naik Level!",
+                description=(
+                    f"Selamat {message.author.mention}! Anda telah naik ke **Level {user_data['level']}**!\n"
+                    f"🎖️ **Jenjang:** `{tier_title}`\n"
+                    f"💼 *{tier_role}*"
+                ),
+                color=CLR_ADHYAKSA_GOLD
+            )
+            lvl_embed.set_thumbnail(url=message.author.display_avatar.url)
+            try:
+                await message.channel.send(embed=lvl_embed, delete_after=12)
+            except Exception:
+                pass
+
+        level_data[user_id_str] = user_data
+        save_level_data()
+
+    # Verifikasi Manual Teks (Fallback)
+    if message.guild.id == GUILD_ID and message.channel.id == VERIFICATION_CHANNEL_ID:
+        member = message.author
+        role_unverified = discord.utils.get(message.guild.roles, name=UNVERIFIED_ROLE_NAME)
+        role_anggota = discord.utils.get(message.guild.roles, name=ANGGOTA_ROLE_NAME)
+
+        if (role_unverified and role_unverified in member.roles) or (role_anggota and role_anggota not in member.roles):
+            nama_baru = message.content.strip()[:32]
+            try:
+                await member.edit(nick=nama_baru)
+            except Exception:
+                pass
+
+            try:
+                if role_unverified and role_unverified in member.roles:
+                    await member.remove_roles(role_unverified)
+                if role_anggota and role_anggota not in member.roles:
+                    await member.add_roles(role_anggota)
+            except Exception:
+                pass
+
+            log_channel = message.guild.get_channel(LOG_CHANNEL_ID)
+            if log_channel:
+                await log_channel.send(f"🟢 {member.mention} terverifikasi via teks dengan nama **{nama_baru}**.")
+
+            try:
+                await message.delete()
+            except Exception:
+                pass
+
+    await bot.process_commands(message)
+
+# ======= SLASH COMMANDS: INFORMASI & ADHYAKSA =======
+
+@tree.command(name="mars_adhyaksa", description="Menampilkan lirik resmi Mars Adhyaksa.", guild=discord.Object(id=GUILD_ID))
+async def mars_adhyaksa(interaction: discord.Interaction):
+    embed = discord.Embed(
+        title="⚔️ MARS ADHYAKSA",
+        description=(
+            "```text\n"
+            "Satya Adi Wicaksana dasar Tripsila Adhyaksa\n"
+            "Landasan jiwa Kejaksaan sebagai abdi masyarakat\n"
+            "Setia dan sempurna\n"
+            "Melaksanakan tugas kewajiban\n"
+            "Tanggung jawab pada Tuhan,\n"
+            "Keluarga dan sesama manusia\n\n"
+            "Abdi negara sebagai penegak hukum\n"
+            "Yang berlambangkan pedang nan sakti\n"
+            "Insan Adhyaksa sebagai pedamba\n"
+            "Keadilan dan perwujudan hukum pasti\n\n"
+            "Kita basmi kemungkaran\n"
+            "Kebatilan dan kejahatan yang\n"
+            "Tersirat dan tersurat imbangan\n"
+            "Tegarlah sepanjang zaman..\n"
+            "```"
+        ),
+        color=CLR_ADHYAKSA_GOLD,
+        timestamp=datetime.now(WIB)
+    )
+    embed.set_footer(text="Kejaksaan Republik Indonesia • Satya Adhi Wicaksana")
+    await interaction.response.send_message(embed=embed)
+
+@tree.command(name="tri_karma_adhyaksa", description="Menampilkan butir Tri Krama Adhyaksa.", guild=discord.Object(id=GUILD_ID))
+async def tri_karma_adhyaksa(interaction: discord.Interaction):
+    embed = discord.Embed(
+        title="⚖️ TRI KRAMA ADHYAKSA",
+        description="Doktrin dan pedoman moral bagi seluruh Insan Kejaksaan Republik Indonesia:",
+        color=CLR_ADHYAKSA_GREEN,
+        timestamp=datetime.now(WIB)
+    )
+    embed.add_field(
+        name="1. 🌟 SATYA",
+        value="Kesetiaan yang bersumber pada rasa jujur, baik terhadap Tuhan Yang Maha Esa, diri pribadi, dan keluarga maupun kepada sesama manusia.",
+        inline=False
+    )
+    embed.add_field(
+        name="2. ⚔️ ADHI",
+        value="Kesempurnaan dalam bertugas dan yang berunsur utama pemilikan rasa tanggung jawab terhadap Tuhan Yang Maha Esa, keluarga, dan sesama manusia.",
+        inline=False
+    )
+    embed.add_field(
+        name="3. 📜 WICAKSANA",
+        value="Bijaksana dalam tutur kata dan tingkah laku, khususnya dalam penerapan tugas dan kewenangan penegakan hukum.",
+        inline=False
+    )
+    embed.set_footer(text="Kejaksaan Republik Indonesia • Satya Adhi Wicaksana")
+    await interaction.response.send_message(embed=embed)
+
+@tree.command(name="prakom_portal", description="Portal tautan resmi aplikasi kedinasan Kejaksaan RI dan BKN.", guild=discord.Object(id=GUILD_ID))
+async def prakom_portal(interaction: discord.Interaction):
+    embed = discord.Embed(
+        title="🌐 Portal Layanan & Tautan Resmi Prakom",
+        description=(
+            "Akses cepat ke portal layanan kepegawaian dan sistem informasi kedinasan. "
+            "Klik tombol interaktif di bawah untuk langsung membuka situs resmi di peramban Anda:"
+        ),
+        color=CLR_NAVY,
+        timestamp=datetime.now(WIB)
+    )
+    embed.add_field(
+        name="🏛️ Badan Kepegawaian Negara (BKN)",
+        value=(
+            "• **MOLA BKN:** Layanan notifikasi & pemantauan berkas usul kenaikan pangkat/SK.\n"
+            "• **MyASN / SIASN:** Data profil kepegawaian ASN terpusat nasional.\n"
+            "• **E-Kinerja BKN:** Pengelolaan SKP, matriks peran hasil, dan penilaian kinerja ASN."
+        ),
+        inline=False
+    )
+    embed.add_field(
+        name="⚖️ Kejaksaan Republik Indonesia",
+        value=(
+            "• **Website Resmi:** Portal berita, publikasi, dan profil Korps Adhyaksa.\n"
+            "• **JDIH Kejaksaan:** Jaringan dokumentasi & produk hukum resmi Kejaksaan.\n"
+            "• **SIMPEG Kejaksaan:** Sistem Informasi Kepegawaian Internal."
+        ),
+        inline=False
+    )
+    embed.add_field(
+        name="📜 Regulasi Jabatan Fungsional",
+        value="• PermenPAN-RB No. 1 Tahun 2023 tentang Jabatan Fungsional Pegawai Negeri Sipil.",
+        inline=False
+    )
+    embed.set_footer(text="Kejaksaan Republik Indonesia • Satya Adhi Wicaksana")
+    view = PortalLinksView()
+    await interaction.response.send_message(embed=embed, view=view)
+
+@tree.command(name="ping", description="Periksa latensi jaringan gateway Discord dan status bot.", guild=discord.Object(id=GUILD_ID))
+async def ping(interaction: discord.Interaction):
+    latency = round(bot.latency * 1000)
+    uptime = datetime.now(WIB) - BOT_START_TIME
+    days = uptime.days
+    hours, rem = divmod(uptime.seconds, 3600)
+    minutes, seconds = divmod(rem, 60)
+    uptime_str = f"{days}h {hours}j {minutes}m {seconds}d" if days > 0 else f"{hours}j {minutes}m {seconds}d"
+
+    embed = discord.Embed(
+        title="🏓 Pong! Status Sistem Bot Prakom",
+        color=CLR_EMERALD if latency < 150 else CLR_AMBER,
+        timestamp=datetime.now(WIB)
+    )
+    embed.add_field(name="📶 Latensi Gateway", value=f"`{latency} ms`", inline=True)
+    embed.add_field(name="⏱️ Waktu Operasional", value=f"`{uptime_str}`", inline=True)
+    embed.add_field(name="👥 Total Anggota", value=f"`{interaction.guild.member_count:,}`", inline=True)
+    embed.set_footer(text="Status Operasional Normal • Prakom Bot Kejaksaan")
+    await interaction.response.send_message(embed=embed)
+
+@tree.command(name="help", description="Panduan lengkap penggunaan perintah Bot Prakom.", guild=discord.Object(id=GUILD_ID))
+async def help_command(interaction: discord.Interaction):
+    admin_role = discord.utils.get(interaction.guild.roles, name=ADMIN_PRAKOM_ROLE)
+    is_admin = (
+        interaction.user.id == interaction.guild.owner_id or
+        interaction.user.guild_permissions.administrator or
+        (admin_role and admin_role in interaction.user.roles)
+    )
+
+    embed = discord.Embed(
+        title="🏛️ Pusat Bantuan Bot Prakom Kejaksaan RI",
+        description=(
+            "Selamat datang di sistem asisten virtual resmi komunitas **Pranata Komputer Kejaksaan RI**.\n\n"
+            "Gunakan menu pilihan dropdown di bawah untuk menjelajahi seluruh modul dan fungsi perintah bot.\n\n"
+            "**Kategori Perintah:**\n"
+            "• 👥 **Anggota & Komunitas:** Sistem level, XP, dan papan peringkat.\n"
+            "• 🎫 **Tiket Bantuan:** Konsultasi kendala teknis dan administrasi.\n"
+            "• ⏰ **Pengingat:** Pengingat agenda dan tenggat waktu kegiatan.\n"
+            "• ⚖️ **Portal & Adhyaksa:** Tautan cepat layanan BKN & Mars Adhyaksa.\n"
+            "• 🛡️ **Moderasi (Khusus Admin):** Pengelolaan keamanan dan ketertiban server."
+        ),
+        color=CLR_ADHYAKSA_GOLD,
+        timestamp=datetime.now(WIB)
+    )
+    embed.set_footer(text="Pilih kategori di bawah untuk melihat rincian perintah")
+    view = HelpView(is_admin)
+    await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
+
+# ======= SLASH COMMANDS: LEVEL & RANK =======
+
+@tree.command(name="rank", description="Lihat kartu status level, perolehan XP, dan gelar jenjang Prakom.", guild=discord.Object(id=GUILD_ID))
+@app_commands.describe(member="Anggota yang ingin dicek rank-nya (kosongkan untuk melihat profil sendiri)")
+async def rank(interaction: discord.Interaction, member: discord.Member = None):
+    target = member or interaction.user
+    user_id_str = str(target.id)
+    data = level_data.get(user_id_str, {"xp": 0, "level": 0})
+    xp = data.get("xp", 0)
+    level = data.get("level", 0)
+
+    base_xp = level * 100
+    next_xp = (level + 1) * 100
+    needed = next_xp - base_xp
+    current_progress = max(0, xp - base_xp)
+
+    bar = create_progress_bar(current_progress, needed, length=12)
+    tier_title, tier_role = get_prakom_tier(level)
+
+    sorted_users = sorted(level_data.items(), key=lambda x: (x[1].get("level", 0), x[1].get("xp", 0)), reverse=True)
+    rank_pos = 1
+    for idx, (uid, _) in enumerate(sorted_users):
+        if uid == user_id_str:
+            rank_pos = idx + 1
+            break
+
+    embed = discord.Embed(
+        title=f"📊 Profil Aktivitas — {target.display_name}",
+        color=CLR_ADHYAKSA_GOLD,
+        timestamp=datetime.now(WIB)
+    )
+    embed.set_thumbnail(url=target.display_avatar.url)
+    embed.add_field(name="🎖️ Peringkat Server", value=f"**#{rank_pos}** dari {len(sorted_users)}", inline=True)
+    embed.add_field(name="⭐ Level Saat Ini", value=f"**Level {level}**", inline=True)
+    embed.add_field(name="✨ Total XP", value=f"**{xp:,} XP**", inline=True)
+    embed.add_field(name="💼 Jenjang Fungsional", value=f"**{tier_title}**\n*{tier_role}*", inline=False)
+    embed.add_field(
+        name="📈 Progres Level Berikutnya",
+        value=f"{bar}\n`{current_progress} / {needed} XP` (Butuh {needed - current_progress} XP lagi)",
+        inline=False
+    )
+    embed.set_footer(text="Aktivitas diskusi di server meningkatkan perolehan XP Anda!")
+    await interaction.response.send_message(embed=embed)
+
+@tree.command(name="leaderboard", description="Papan peringkat 10 anggota teraktif di server.", guild=discord.Object(id=GUILD_ID))
+async def leaderboard(interaction: discord.Interaction):
+    await interaction.response.defer()
+    if not level_data:
+        await interaction.followup.send("Belum ada data aktivitas anggota.", ephemeral=True)
+        return
+
+    sorted_users = sorted(level_data.items(), key=lambda x: (x[1].get("level", 0), x[1].get("xp", 0)), reverse=True)[:10]
+    medals = ["👑", "🥈", "🥉"]
+    desc = ""
+
+    for idx, (uid, data) in enumerate(sorted_users):
+        user = interaction.guild.get_member(int(uid))
+        name = user.display_name if user else f"User {uid}"
+        icon = medals[idx] if idx < 3 else f"`#{idx+1}`"
+        tier_title, _ = get_prakom_tier(data.get("level", 0))
+        desc += f"{icon} **{name}**\n   └ Level **{data.get('level', 0)}** • `{data.get('xp', 0):,} XP` • *{tier_title}*\n\n"
+
+    embed = discord.Embed(
+        title="🏆 Papan Peringkat Aktivitas Anggota (Top 10)",
+        description=desc or "Belum ada catatan aktivitas.",
+        color=CLR_ADHYAKSA_GOLD,
+        timestamp=datetime.now(WIB)
+    )
+    embed.set_footer(text="Kejaksaan Republik Indonesia • Komunitas Prakom")
+    await interaction.followup.send(embed=embed)
+
+# ======= SLASH COMMANDS: REMINDERS =======
+
+@tree.command(name="set_reminder", description="Pasang pengingat pribadi, publik, atau role.", guild=discord.Object(id=GUILD_ID))
 @app_commands.describe(
-    tipe="Tipe reminder: pribadi, publik, sekali, atau role",
-    waktu="Waktu pengingat. Format HH:MM untuk publik, YYYY-MM-DDTHH:MM untuk pribadi/sekali/role",
-    pesan="Pesan yang akan dikirim",
-    target_role="Nama role jika tipe adalah 'role' (opsional)",
-    target_user="Pengguna jika tipe adalah 'pribadi' (opsional, gunakan @mention atau ID)"
+    tipe="Tipe: pribadi (DM), publik (channel harian), sekali (channel), atau role",
+    waktu="Format: HH:MM (publik harian) atau YYYY-MM-DDTHH:MM (pribadi/sekali/role)",
+    pesan="Isi pengingat",
+    target_role="Nama role jika tipe adalah 'role'",
+    target_user="Target pengguna jika tipe adalah 'pribadi' (default: diri sendiri)"
 )
 async def set_reminder(
     interaction: discord.Interaction,
@@ -757,18 +1450,19 @@ async def set_reminder(
 ):
     await interaction.response.defer(ephemeral=True)
     now = datetime.now(WIB)
-    tipe = tipe.lower()
+    tipe = tipe.lower().strip()
+    rem_id = str(uuid.uuid4())[:6]
 
     if tipe == "sekali":
         try:
-            dt = datetime.fromisoformat(waktu)
+            dt = datetime.fromisoformat(waktu.replace(" ", "T"))
             dt = dt.replace(tzinfo=WIB)
-
             if dt < now:
-                await interaction.followup.send("Waktu reminder harus di masa depan.", ephemeral=True)
+                await interaction.followup.send("❌ Waktu reminder harus berada di masa depan.", ephemeral=True)
                 return
 
             role_reminders.append({
+                "id": rem_id,
                 "tipe": "sekali_channel",
                 "waktu": dt,
                 "pesan": pesan,
@@ -776,443 +1470,728 @@ async def set_reminder(
                 "creator_id": interaction.user.id
             })
             save_role_reminders()
-            await interaction.followup.send(f"✅ Reminder sekali set untuk **{dt.strftime('%d %b %Y %H:%M WIB')}** di channel ini.", ephemeral=True)
+
+            embed = discord.Embed(
+                title="✅ Pengingat Berhasil Diatur",
+                description=(
+                    f"Pengingat sekali berhasil dijadwalkan:\n\n"
+                    f"📅 **Waktu:** {dt.strftime('%d %b %Y, %H:%M WIB')}\n"
+                    f"📍 **Channel:** {interaction.channel.mention}\n"
+                    f"📝 **Pesan:** {pesan}\n"
+                    f"🏷️ **ID Pengingat:** `{rem_id}`"
+                ),
+                color=CLR_EMERALD
+            )
+            await interaction.followup.send(embed=embed, ephemeral=True)
         except ValueError:
-            await interaction.followup.send("❌ Format waktu sekali harus YYYY-MM-DDTHH:MM (contoh: 2025-05-26T14:30).", ephemeral=True)
+            await interaction.followup.send("❌ Format waktu harus `YYYY-MM-DDTHH:MM` (contoh: 2026-05-20T14:30).", ephemeral=True)
 
     elif tipe == "publik":
-        channel = interaction.channel
         try:
-            datetime.strptime(waktu, "%H:%M") # Hanya validasi format waktu
-            public_reminders[channel.id].append((waktu, pesan))
-            await interaction.followup.send(f"✅ Reminder publik set di channel ini pada jam **{waktu} WIB**.", ephemeral=True)
+            datetime.strptime(waktu, "%H:%M")
+            public_reminders_data[interaction.channel.id].append({
+                "id": rem_id,
+                "time": waktu,
+                "message": pesan,
+                "creator_id": interaction.user.id
+            })
+            save_public_reminders()
+
+            embed = discord.Embed(
+                title="✅ Pengingat Publik Rutin Berhasil Diatur",
+                description=(
+                    f"Pengingat harian berhasil dipasang:\n\n"
+                    f"⏰ **Jadwal:** Setiap hari pukul **{waktu} WIB**\n"
+                    f"📍 **Channel:** {interaction.channel.mention}\n"
+                    f"📝 **Pesan:** {pesan}\n"
+                    f"🏷️ **ID Pengingat:** `{rem_id}`"
+                ),
+                color=CLR_EMERALD
+            )
+            await interaction.followup.send(embed=embed, ephemeral=True)
         except ValueError:
-            await interaction.followup.send("❌ Format waktu publik harus HH:MM (24 jam, contoh: 14:30).", ephemeral=True)
+            await interaction.followup.send("❌ Format waktu publik harus `HH:MM` (contoh: 14:30).", ephemeral=True)
 
     elif tipe == "pribadi":
-        if not target_user:
-            await interaction.followup.send("❌ Untuk pengingat pribadi, kamu harus menyebutkan pengguna yang dituju (`target_user`).", ephemeral=True)
-            return
-
+        dest_user = target_user or interaction.user
         try:
-            dt = datetime.fromisoformat(waktu)
+            dt = datetime.fromisoformat(waktu.replace(" ", "T"))
             dt = dt.replace(tzinfo=WIB)
-
             if dt < now:
-                await interaction.followup.send("Waktu reminder harus di masa depan.", ephemeral=True)
+                await interaction.followup.send("❌ Waktu reminder harus berada di masa depan.", ephemeral=True)
                 return
 
-            user_id_str = str(target_user.id)
-            if user_id_str not in private_reminders_data:
-                private_reminders_data[user_id_str] = []
-            private_reminders_data[user_id_str].append({"time": dt, "message": pesan})
+            uid_str = str(dest_user.id)
+            if uid_str not in private_reminders_data:
+                private_reminders_data[uid_str] = []
+            private_reminders_data[uid_str].append({
+                "id": rem_id,
+                "time": dt,
+                "message": pesan
+            })
             save_private_reminders()
-            await interaction.followup.send(f"✅ Pengingat pribadi set untuk {target_user.mention} pada **{dt.strftime('%d %b %Y %H:%M WIB')}**.", ephemeral=True)
+
+            embed = discord.Embed(
+                title="✅ Pengingat Pribadi Berhasil Diatur",
+                description=(
+                    f"Pengingat DM berhasil dijadwalkan:\n\n"
+                    f"👤 **Penerima:** {dest_user.mention}\n"
+                    f"📅 **Waktu:** {dt.strftime('%d %b %Y, %H:%M WIB')}\n"
+                    f"📝 **Pesan:** {pesan}\n"
+                    f"🏷️ **ID Pengingat:** `{rem_id}`"
+                ),
+                color=CLR_EMERALD
+            )
+            await interaction.followup.send(embed=embed, ephemeral=True)
         except ValueError:
-            await interaction.followup.send("❌ Format waktu pribadi harus YYYY-MM-DDTHH:MM (contoh: 2025-05-26T14:30).", ephemeral=True)
+            await interaction.followup.send("❌ Format waktu pribadi harus `YYYY-MM-DDTHH:MM` (contoh: 2026-05-20T14:30).", ephemeral=True)
 
     elif tipe == "role":
         if not target_role:
-            await interaction.followup.send("❌ Untuk pengingat role, kamu harus menyebutkan nama role yang dituju (`target_role`).", ephemeral=True)
+            await interaction.followup.send("❌ Untuk pengingat role, Anda harus mengisi parameter `target_role`.", ephemeral=True)
             return
 
-        guild = interaction.guild
-        role_obj = discord.utils.get(guild.roles, name=target_role)
-
+        role_obj = discord.utils.get(interaction.guild.roles, name=target_role)
         if not role_obj:
-            await interaction.followup.send(f"❌ Role '{target_role}' tidak ditemukan di server ini.", ephemeral=True)
+            await interaction.followup.send(f"❌ Role `{target_role}` tidak ditemukan di server ini.", ephemeral=True)
             return
 
         try:
-            dt = datetime.fromisoformat(waktu)
+            dt = datetime.fromisoformat(waktu.replace(" ", "T"))
             dt = dt.replace(tzinfo=WIB)
-
             if dt < now:
-                await interaction.followup.send("Waktu reminder harus di masa depan.", ephemeral=True)
+                await interaction.followup.send("❌ Waktu reminder harus berada di masa depan.", ephemeral=True)
                 return
 
             role_reminders.append({
+                "id": rem_id,
                 "tipe": "role",
                 "waktu": dt,
                 "pesan": pesan,
-                "channel_id": interaction.channel.id, # Pengingat role akan dikirim di channel ini
+                "channel_id": interaction.channel.id,
                 "role_name": target_role,
                 "creator_id": interaction.user.id
             })
             save_role_reminders()
-            await interaction.followup.send(f"✅ Pengingat untuk role **@{target_role}** set pada **{dt.strftime('%d %b %Y %H:%M WIB')}** di channel ini.", ephemeral=True)
+
+            embed = discord.Embed(
+                title="✅ Pengingat Role Berhasil Diatur",
+                description=(
+                    f"Pengingat untuk role berhasil dijadwalkan:\n\n"
+                    f"👥 **Target Role:** {role_obj.mention}\n"
+                    f"📅 **Waktu:** {dt.strftime('%d %b %Y, %H:%M WIB')}\n"
+                    f"📍 **Channel:** {interaction.channel.mention}\n"
+                    f"📝 **Pesan:** {pesan}\n"
+                    f"🏷️ **ID Pengingat:** `{rem_id}`"
+                ),
+                color=CLR_EMERALD
+            )
+            await interaction.followup.send(embed=embed, ephemeral=True)
         except ValueError:
-            await interaction.followup.send("❌ Format waktu role harus YYYY-MM-DDTHH:MM (contoh: 2025-05-26T14:30).", ephemeral=True)
-
+            await interaction.followup.send("❌ Format waktu role harus `YYYY-MM-DDTHH:MM` (contoh: 2026-05-20T14:30).", ephemeral=True)
     else:
-        await interaction.followup.send("❌ Tipe reminder tidak valid. Gunakan 'pribadi', 'publik', 'sekali', atau 'role'.", ephemeral=True)
+        await interaction.followup.send("❌ Tipe reminder tidak valid. Pilih antara: `pribadi`, `publik`, `sekali`, atau `role`.", ephemeral=True)
 
+@tree.command(name="list_reminders", description="Lihat daftar pengingat aktif milikmu atau di channel ini.", guild=discord.Object(id=GUILD_ID))
+async def list_reminders(interaction: discord.Interaction):
+    await interaction.response.defer(ephemeral=True)
+    uid_str = str(interaction.user.id)
+    now = datetime.now(WIB)
 
-## Perintah Moderasi (Admin Prakom Only)
+    desc = ""
 
-@tree.command(name="warn", description="Beri peringatan kepada anggota.", guild=discord.Object(id=GUILD_ID))
-@app_commands.describe(
-    member="Anggota yang akan diberi peringatan",
-    reason="Alasan peringatan"
-)
+    user_rems = private_reminders_data.get(uid_str, [])
+    if user_rems:
+        desc += "🔔 **Pengingat Pribadi Anda:**\n"
+        for r in user_rems:
+            t = r['time'] if isinstance(r['time'], datetime) else datetime.fromisoformat(r['time'])
+            desc += f"• `ID: {r.get('id', 'N/A')}` | **{t.strftime('%d %b %Y %H:%M')}**: {r['message']}\n"
+        desc += "\n"
+
+    channel_rems = public_reminders_data.get(interaction.channel.id, [])
+    if channel_rems:
+        desc += f"📢 **Pengingat Publik Harian ({interaction.channel.mention}):**\n"
+        for r in channel_rems:
+            desc += f"• `ID: {r.get('id', 'N/A')}` | Pukul **{r['time']} WIB**: {r['message']}\n"
+        desc += "\n"
+
+    role_rems_chan = [r for r in role_reminders if r.get("channel_id") == interaction.channel.id]
+    if role_rems_chan:
+        desc += f"🗓️ **Pengingat Terjadwal ({interaction.channel.mention}):**\n"
+        for r in role_rems_chan:
+            t = r['waktu'] if isinstance(r['waktu'], datetime) else datetime.fromisoformat(r['waktu'])
+            target = f"Role @{r['role_name']}" if r.get('tipe') == 'role' else "Channel"
+            desc += f"• `ID: {r.get('id', 'N/A')}` | **{t.strftime('%d %b %Y %H:%M')}** ({target}): {r['pesan']}\n"
+
+    if not desc:
+        desc = "Tidak ada pengingat aktif yang ditemukan untuk Anda atau di channel ini."
+
+    embed = discord.Embed(
+        title="📋 Daftar Pengingat Aktif",
+        description=desc,
+        color=CLR_CYAN,
+        timestamp=now
+    )
+    embed.set_footer(text="Gunakan /cancel_reminder [ID] untuk membatalkan pengingat.")
+    await interaction.followup.send(embed=embed, ephemeral=True)
+
+@tree.command(name="cancel_reminder", description="Batalkan pengingat aktif berdasarkan ID-nya.", guild=discord.Object(id=GUILD_ID))
+@app_commands.describe(reminder_id="ID pengingat yang ingin dibatalkan")
+async def cancel_reminder(interaction: discord.Interaction, reminder_id: str):
+    await interaction.response.defer(ephemeral=True)
+    reminder_id = reminder_id.strip()
+    uid_str = str(interaction.user.id)
+    found = False
+
+    if uid_str in private_reminders_data:
+        for rem in list(private_reminders_data[uid_str]):
+            if rem.get("id") == reminder_id:
+                private_reminders_data[uid_str].remove(rem)
+                if not private_reminders_data[uid_str]:
+                    del private_reminders_data[uid_str]
+                save_private_reminders()
+                found = True
+                break
+
+    if not found:
+        for cid, rem_list in list(public_reminders_data.items()):
+            for rem in list(rem_list):
+                if rem.get("id") == reminder_id:
+                    admin_role = discord.utils.get(interaction.guild.roles, name=ADMIN_PRAKOM_ROLE)
+                    is_admin = (
+                        interaction.user.id == interaction.guild.owner_id or
+                        interaction.user.guild_permissions.administrator or
+                        (admin_role and admin_role in interaction.user.roles)
+                    )
+                    if rem.get("creator_id") == interaction.user.id or is_admin:
+                        rem_list.remove(rem)
+                        save_public_reminders()
+                        found = True
+                        break
+            if found:
+                break
+
+    if not found:
+        for rem in list(role_reminders):
+            if rem.get("id") == reminder_id:
+                admin_role = discord.utils.get(interaction.guild.roles, name=ADMIN_PRAKOM_ROLE)
+                is_admin = (
+                    interaction.user.id == interaction.guild.owner_id or
+                    interaction.user.guild_permissions.administrator or
+                    (admin_role and admin_role in interaction.user.roles)
+                )
+                if rem.get("creator_id") == interaction.user.id or is_admin:
+                    role_reminders.remove(rem)
+                    save_role_reminders()
+                    found = True
+                    break
+
+    if found:
+        embed = discord.Embed(
+            description=f"✅ Pengingat dengan ID `{reminder_id}` berhasil dibatalkan dan dihapus.",
+            color=CLR_EMERALD
+        )
+        await interaction.followup.send(embed=embed, ephemeral=True)
+    else:
+        embed = discord.Embed(
+            description=f"❌ Pengingat dengan ID `{reminder_id}` tidak ditemukan atau Anda tidak memiliki hak akses untuk membatalkannya.",
+            color=CLR_CRIMSON
+        )
+        await interaction.followup.send(embed=embed, ephemeral=True)
+
+# ======= SLASH COMMANDS: SETUP PANEL (ADMIN ONLY) =======
+
+@tree.command(name="setup_verification", description="Kirim panel verifikasi interaktif ber-tombol ke channel.", guild=discord.Object(id=GUILD_ID))
+@app_commands.describe(channel="Channel tujuan (opsional, default: channel verifikasi)")
+@is_admin_prakom()
+async def setup_verification(interaction: discord.Interaction, channel: discord.TextChannel = None):
+    await interaction.response.defer(ephemeral=True)
+    target_channel = channel or interaction.guild.get_channel(VERIFICATION_CHANNEL_ID) or interaction.channel
+
+    embed = discord.Embed(
+        title="🏛️ GERBANG VERIFIKASI PRAKOM KEJAKSAAN RI",
+        description=(
+            "Selamat datang di server komunikasi resmi **Pranata Komputer Kejaksaan Republik Indonesia**!\n\n"
+            "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+            "Untuk menjamin keamanan, kenyamanan, serta profesionalitas diskusi antar-insan Adhyaksa, "
+            "seluruh anggota diwajibkan melakukan pencatatan identitas resmi sebelum mengakses server.\n\n"
+            "**📋 Petunjuk & Alur Verifikasi:**\n"
+            "**1.** Klik tombol hijau **`📝 Verifikasi Sekarang`** di bawah.\n"
+            "**2.** Masukkan **Nama Lengkap & Gelar Akademik** Anda.\n"
+            "**3.** Masukkan **Satuan Kerja / NIP / Jenjang Jabatan** Anda.\n"
+            "**4.** Sistem otomatis menyesuaikan nama tampilan Anda dan memberikan akses role **Anggota**.\n"
+            "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+            "*Salam Korps Adhyaksa: Satya Adhi Wicaksana.*"
+        ),
+        color=CLR_ADHYAKSA_GOLD
+    )
+    embed.set_footer(text="Kejaksaan Republik Indonesia • Sistem Informasi Manajemen Komunitas")
+    view = VerificationView()
+    await target_channel.send(embed=embed, view=view)
+    await interaction.followup.send(f"✅ Panel verifikasi berhasil dikirimkan ke {target_channel.mention}.", ephemeral=True)
+
+@tree.command(name="setup_gender", description="Kirim panel pemilihan role Prakom Cantik / Ganteng ke channel.", guild=discord.Object(id=GUILD_ID))
+@app_commands.describe(channel="Channel tujuan (opsional, default: channel gender)")
+@is_admin_prakom()
+async def setup_gender(interaction: discord.Interaction, channel: discord.TextChannel = None):
+    await interaction.response.defer(ephemeral=True)
+    target_channel = channel or interaction.guild.get_channel(GENDER_CHANNEL_ID) or interaction.channel
+
+    embed = discord.Embed(
+        title="👥 PEMILIHAN IDENTITAS PERAN PRAKOM",
+        description=(
+            "Silakan sematkan role kebanggaan Anda di komunitas Prakom Kejaksaan RI dengan menekan tombol di bawah:\n\n"
+            "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+            "👩 **PRAKOM CANTIK**\n"
+            "Khusus untuk rekan-rekan Pranata Komputer wanita yang berdedikasi membangun TI Kejaksaan.\n\n"
+            "👨 **PRAKOM GANTENG**\n"
+            "Khusus untuk rekan-rekan Pranata Komputer pria yang senantiasa menjaga keandalan sistem TI.\n"
+            "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+            "💡 *Anda dapat memperbarui atau mengganti pilihan kapan saja dengan menekan tombol kembali.*"
+        ),
+        color=CLR_PURPLE
+    )
+    embed.set_footer(text="Kejaksaan Republik Indonesia • Korps Adhyaksa")
+    view = GenderRoleView()
+    await target_channel.send(embed=embed, view=view)
+    await interaction.followup.send(f"✅ Panel role gender berhasil dikirimkan ke {target_channel.mention}.", ephemeral=True)
+
+# ======= SLASH COMMANDS: TIKET =======
+
+@tree.command(name="create_ticket", description="Buka tiket bantuan teknis atau konsultasi secara privat.", guild=discord.Object(id=GUILD_ID))
+async def create_ticket(interaction: discord.Interaction):
+    await interaction.response.defer(ephemeral=True)
+    channel, error_msg = await create_ticket_channel(interaction.guild, interaction.user)
+
+    if channel:
+        embed = discord.Embed(
+            title="🎫 TIKET BANTUAN TEKNIS & KONSULTASI",
+            description=(
+                f"Halo {interaction.user.mention}! Tiket bantuan Anda telah berhasil dibuat.\n\n"
+                f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                f"**📌 Panduan Konsultasi:**\n"
+                f"• Jelaskan secara spesifik kendala yang Anda alami (aplikasi, akun, atau regulasi Prakom).\n"
+                f"• Sertakan tangkapan layar (screenshot) pesan error atau bukti dokumen bila diperlukan.\n"
+                f"• Tim Admin & Moderator Prakom akan segera mendampingi Anda di channel ini.\n"
+                f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+                f"*Gunakan tombol interaktif di bawah untuk mengelola status tiket.*"
+            ),
+            color=CLR_EMERALD,
+            timestamp=datetime.now(WIB)
+        )
+        embed.set_footer(text="Arsip transkrip chat akan otomatis dikirimkan ke log admin saat tiket ditutup.")
+        view = PersistentTicketButtons()
+        await channel.send(embed=embed, view=view)
+        await interaction.followup.send(f"✅ Tiket bantuan Anda telah dibuat di {channel.mention}.", ephemeral=True)
+
+        log_admin = interaction.guild.get_channel(LOGADMIN_CHANNEL_ID)
+        if log_admin:
+            await log_admin.send(f"🆕 **Tiket Baru:** `{channel.name}` dibuat oleh {interaction.user.mention}.")
+    else:
+        await interaction.followup.send(error_msg or "❌ Gagal membuat tiket.", ephemeral=True)
+
+# ======= SLASH COMMANDS: MODERASI (ADMIN ONLY) =======
+
+@tree.command(name="warn", description="Beri sanksi peringatan resmi kepada anggota.", guild=discord.Object(id=GUILD_ID))
+@app_commands.describe(member="Anggota yang akan diberi peringatan", reason="Alasan peringatan")
 @is_admin_prakom()
 async def warn(interaction: discord.Interaction, member: discord.Member, reason: str = "Tidak ada alasan"):
     await interaction.response.defer(ephemeral=True)
-
     member_id = str(member.id)
+
     if member_id not in warn_data:
         warn_data[member_id] = []
-    
-    warn_data[member_id].append({"reason": reason, "timestamp": datetime.now(WIB).isoformat(), "admin": interaction.user.id})
+
+    warn_entry = {
+        "reason": reason,
+        "timestamp": datetime.now(WIB).isoformat(),
+        "admin": interaction.user.id
+    }
+    warn_data[member_id].append(warn_entry)
     save_warn_data()
 
-    await interaction.followup.send(f"✅ {member.mention} telah diberi peringatan karena: {reason}", ephemeral=False)
-    log_admin_channel = interaction.guild.get_channel(LOGADMIN_CHANNEL_ID)
-    if log_admin_channel:
-        await log_admin_channel.send(f"⚠️ **Peringatan:** {member.mention} diberi peringatan oleh {interaction.user.mention} karena: {reason}")
-    
+    embed = discord.Embed(
+        title="⚠️ Sanksi Peringatan Diberikan",
+        description=(
+            f"Anggota: {member.mention}\n"
+            f"Alasan: **{reason}**\n"
+            f"Total Peringatan: **{len(warn_data[member_id])} kali**"
+        ),
+        color=CLR_AMBER,
+        timestamp=datetime.now(WIB)
+    )
+    embed.set_footer(text=f"Diberikan oleh {interaction.user.display_name}")
+    await interaction.followup.send(embed=embed, ephemeral=False)
+
+    log_admin = interaction.guild.get_channel(LOGADMIN_CHANNEL_ID)
+    if log_admin:
+        await log_admin.send(f"⚠️ **Peringatan:** {member.mention} diberi peringatan oleh {interaction.user.mention}. Alasan: `{reason}`")
+
     try:
-        await member.send(f"Kamu telah diberi peringatan di server {interaction.guild.name} karena: {reason}. Mohon patuhi peraturan server.")
+        dm_embed = discord.Embed(
+            title=f"⚠️ Peringatan dari Server {interaction.guild.name}",
+            description=(
+                f"Anda telah menerima peringatan resmi dari staf server.\n\n"
+                f"📝 **Alasan:** {reason}\n"
+                f"Mohon patuhi peraturan komunitas demi kenyamanan bersama."
+            ),
+            color=CLR_AMBER
+        )
+        await member.send(embed=dm_embed)
     except discord.Forbidden:
-        await interaction.followup.send(f"❗ Gagal mengirim DM peringatan ke {member.mention}. Mungkin DM mereka ditutup.", ephemeral=True)
+        pass
 
-
-@tree.command(name="warnings", description="Lihat jumlah peringatan anggota.", guild=discord.Object(id=GUILD_ID))
-@app_commands.describe(member="Anggota yang ingin dilihat peringatannya")
+@tree.command(name="warnings", description="Lihat riwayat catatan peringatan anggota.", guild=discord.Object(id=GUILD_ID))
+@app_commands.describe(member="Anggota yang ingin diperiksa")
 @is_admin_prakom()
 async def warnings(interaction: discord.Interaction, member: discord.Member):
     await interaction.response.defer(ephemeral=True)
-
     member_id = str(member.id)
-    if member_id not in warn_data or not warn_data[member_id]:
-        await interaction.followup.send(f"✅ {member.mention} tidak memiliki peringatan.", ephemeral=True)
+    warns = warn_data.get(member_id, [])
+
+    if not warns:
+        embed = discord.Embed(
+            description=f"✅ {member.mention} memiliki catatan bersih tanpa peringatan.",
+            color=CLR_EMERALD
+        )
+        await interaction.followup.send(embed=embed, ephemeral=True)
         return
 
-    warns = warn_data[member_id]
-    description = f"**Peringatan untuk {member.mention}:**\n"
-    for i, warn_info in enumerate(warns):
-        timestamp = datetime.fromisoformat(warn_info["timestamp"]).strftime('%Y-%m-%d %H:%M WIB')
-        admin = await bot.fetch_user(warn_info["admin"])
-        admin_name = admin.name if admin else "Admin tidak diketahui"
-        description += f"{i+1}. Alasan: `{warn_info['reason']}` pada {timestamp} oleh {admin_name}.\n"
-    
-    embed = discord.Embed(title="Daftar Peringatan", description=description, color=discord.Color.orange())
+    desc = f"**Total Akumulasi: {len(warns)} Peringatan**\n\n"
+    for i, w in enumerate(warns):
+        ts = datetime.fromisoformat(w["timestamp"]).strftime('%d %b %Y, %H:%M WIB')
+        admin = interaction.guild.get_member(w["admin"])
+        admin_name = admin.display_name if admin else f"Admin ({w['admin']})"
+        desc += f"**{i+1}.** `{w['reason']}`\n   └ 🗓️ {ts} • Oleh: **{admin_name}**\n\n"
+
+    embed = discord.Embed(
+        title=f"📋 Riwayat Peringatan — {member.display_name}",
+        description=desc,
+        color=CLR_AMBER
+    )
     await interaction.followup.send(embed=embed, ephemeral=True)
 
-@tree.command(name="clear_warnings", description="Hapus semua peringatan anggota.", guild=discord.Object(id=GUILD_ID))
-@app_commands.describe(member="Anggota yang ingin dihapus peringatannya")
+@tree.command(name="clear_warnings", description="Bersihkan seluruh catatan peringatan anggota.", guild=discord.Object(id=GUILD_ID))
+@app_commands.describe(member="Anggota yang ingin dibersihkan peringatannya")
 @is_admin_prakom()
 async def clear_warnings(interaction: discord.Interaction, member: discord.Member):
     await interaction.response.defer(ephemeral=True)
-
     member_id = str(member.id)
+
     if member_id in warn_data:
         del warn_data[member_id]
         save_warn_data()
-        await interaction.followup.send(f"✅ Semua peringatan untuk {member.mention} telah dihapus.", ephemeral=True)
-        log_admin_channel = interaction.guild.get_channel(LOGADMIN_CHANNEL_ID)
-        if log_admin_channel:
-            await log_admin_channel.send(f"🧹 **Peringatan Dihapus:** Semua peringatan untuk {member.mention} telah dihapus oleh {interaction.user.mention}.")
-    else:
-        await interaction.followup.send(f"❗ {member.mention} tidak memiliki peringatan untuk dihapus.", ephemeral=True)
+        embed = discord.Embed(
+            description=f"✅ Seluruh catatan peringatan untuk {member.mention} berhasil dihapus bersih.",
+            color=CLR_EMERALD
+        )
+        await interaction.followup.send(embed=embed, ephemeral=True)
 
-@tree.command(name="mute", description="Mute anggota untuk sementara.", guild=discord.Object(id=GUILD_ID))
+        log_admin = interaction.guild.get_channel(LOGADMIN_CHANNEL_ID)
+        if log_admin:
+            await log_admin.send(f"🧹 **Peringatan Dihapus:** Riwayat sanksi {member.mention} dibersihkan oleh {interaction.user.mention}.")
+    else:
+        await interaction.followup.send(f"ℹ️ {member.mention} tidak memiliki catatan peringatan.", ephemeral=True)
+
+@tree.command(name="mute", description="Timeout / Mute anggota untuk sementara waktu.", guild=discord.Object(id=GUILD_ID))
 @app_commands.describe(
-    member="Anggota yang akan dimute",
-    duration_minutes="Durasi mute dalam menit",
+    member="Anggota target",
+    duration_minutes="Durasi mute dalam menit (maksimal 40320 menit / 28 hari)",
     reason="Alasan mute"
 )
 @is_admin_prakom()
 async def mute(interaction: discord.Interaction, member: discord.Member, duration_minutes: int, reason: str = "Tidak ada alasan"):
     await interaction.response.defer(ephemeral=True)
 
-    guild = interaction.guild
-    mute_role = discord.utils.get(guild.roles, name=MUTE_ROLE_NAME)
-
-    if not mute_role:
-        try:
-            mute_role = await guild.create_role(name=MUTE_ROLE_NAME)
-            for channel in guild.channels:
-                await channel.set_permissions(mute_role, send_messages=False, speak=False)
-            await interaction.followup.send(f"✅ Role '{MUTE_ROLE_NAME}' dibuat dan izin disesuaikan.", ephemeral=True)
-        except discord.Forbidden:
-            await interaction.followup.send("❌ Bot tidak memiliki izin untuk membuat role atau mengatur izin channel.", ephemeral=True)
-            return
-
-    if mute_role in member.roles:
-        await interaction.followup.send(f"❗ {member.mention} sudah dimute.", ephemeral=True)
+    if duration_minutes <= 0:
+        await interaction.followup.send("❌ Durasi mute harus lebih dari 0 menit.", ephemeral=True)
+        return
+    if member.id == bot.user.id or member.id == interaction.user.id:
+        await interaction.followup.send("❌ Tidak dapat memute diri sendiri atau bot.", ephemeral=True)
+        return
+    if member.top_role >= interaction.guild.me.top_role:
+        await interaction.followup.send("❌ Role anggota tersebut setara atau lebih tinggi dari bot.", ephemeral=True)
+        return
+    if member.top_role >= interaction.user.top_role and interaction.user.id != interaction.guild.owner_id:
+        await interaction.followup.send("❌ Role anggota tersebut setara atau lebih tinggi dari Anda.", ephemeral=True)
         return
 
     try:
-        await member.add_roles(mute_role, reason=reason)
-        await interaction.followup.send(f"✅ {member.mention} telah dimute selama {duration_minutes} menit karena: {reason}", ephemeral=False)
-        log_admin_channel = interaction.guild.get_channel(LOGADMIN_CHANNEL_ID)
-        if log_admin_channel:
-            await log_admin_channel.send(f"🔇 **Mute:** {member.mention} dimute oleh {interaction.user.mention} selama {duration_minutes} menit karena: {reason}.")
-        
-        await asyncio.sleep(duration_minutes * 60)
-        if mute_role in member.roles: # Pastikan masih dimute sebelum unmute
-            await member.remove_roles(mute_role)
-            await interaction.channel.send(f"✅ {member.mention} telah diunmute secara otomatis.", ephemeral=False)
-            if log_admin_channel:
-                await log_admin_channel.send(f"🔊 **Unmute Otomatis:** {member.mention} telah diunmute secara otomatis.")
-    except discord.Forbidden:
-        await interaction.followup.send("❌ Bot tidak memiliki izin untuk memute anggota.", ephemeral=True)
-    except Exception as e:
-        await interaction.followup.send(f"❌ Terjadi kesalahan saat memute: {e}", ephemeral=True)
+        if duration_minutes <= 40320:
+            duration = timedelta(minutes=duration_minutes)
+            await member.timeout(duration, reason=reason)
+            embed = discord.Embed(
+                title="🔇 Anggota Dimute (Timeout)",
+                description=(
+                    f"Anggota: {member.mention}\n"
+                    f"Durasi: **{duration_minutes} Menit**\n"
+                    f"Alasan: **{reason}**"
+                ),
+                color=CLR_CRIMSON,
+                timestamp=datetime.now(WIB)
+            )
+            embed.set_footer(text=f"Dimute oleh {interaction.user.display_name}")
+            await interaction.followup.send(embed=embed, ephemeral=False)
+        else:
+            mute_role = discord.utils.get(interaction.guild.roles, name=MUTE_ROLE_NAME)
+            if not mute_role:
+                mute_role = await interaction.guild.create_role(name=MUTE_ROLE_NAME)
+            await member.add_roles(mute_role, reason=reason)
+            await interaction.followup.send(f"✅ {member.mention} telah dimute via role selama **{duration_minutes} menit**.", ephemeral=False)
 
-@tree.command(name="unmute", description="Unmute anggota.", guild=discord.Object(id=GUILD_ID))
-@app_commands.describe(member="Anggota yang akan diunmute")
+        log_admin = interaction.guild.get_channel(LOGADMIN_CHANNEL_ID)
+        if log_admin:
+            await log_admin.send(f"🔇 **Mute:** {member.mention} dimute selama {duration_minutes} menit oleh {interaction.user.mention}. Alasan: `{reason}`")
+    except discord.Forbidden:
+        await interaction.followup.send("❌ Bot tidak memiliki izin untuk memute anggota ini.", ephemeral=True)
+    except Exception as e:
+        await interaction.followup.send(f"❌ Terjadi kesalahan: {e}", ephemeral=True)
+
+@tree.command(name="unmute", description="Lepaskan status timeout / mute anggota.", guild=discord.Object(id=GUILD_ID))
+@app_commands.describe(member="Anggota target yang akan diunmute")
 @is_admin_prakom()
 async def unmute(interaction: discord.Interaction, member: discord.Member):
     await interaction.response.defer(ephemeral=True)
-
-    guild = interaction.guild
-    mute_role = discord.utils.get(guild.roles, name=MUTE_ROLE_NAME)
-
-    if not mute_role or mute_role not in member.roles:
-        await interaction.followup.send(f"❗ {member.mention} tidak dalam keadaan mute.", ephemeral=True)
-        return
+    was_muted = False
 
     try:
-        await member.remove_roles(mute_role)
-        await interaction.followup.send(f"✅ {member.mention} telah diunmute.", ephemeral=False)
-        log_admin_channel = interaction.guild.get_channel(LOGADMIN_CHANNEL_ID)
-        if log_admin_channel:
-            await log_admin_channel.send(f"🔊 **Unmute Manual:** {member.mention} telah diunmute oleh {interaction.user.mention}.")
+        if member.is_timed_out():
+            await member.timeout(None, reason=f"Unmuted oleh {interaction.user.name}")
+            was_muted = True
+
+        mute_role = discord.utils.get(interaction.guild.roles, name=MUTE_ROLE_NAME)
+        if mute_role and mute_role in member.roles:
+            await member.remove_roles(mute_role, reason=f"Unmuted oleh {interaction.user.name}")
+            was_muted = True
+
+        if was_muted:
+            embed = discord.Embed(
+                description=f"🔊 Status mute / timeout untuk {member.mention} berhasil dicabut.",
+                color=CLR_EMERALD
+            )
+            await interaction.followup.send(embed=embed, ephemeral=False)
+
+            log_admin = interaction.guild.get_channel(LOGADMIN_CHANNEL_ID)
+            if log_admin:
+                await log_admin.send(f"🔊 **Unmute:** {member.mention} telah diunmute oleh {interaction.user.mention}.")
+        else:
+            await interaction.followup.send(f"ℹ️ {member.mention} tidak sedang dalam kondisi mute atau timeout.", ephemeral=True)
     except discord.Forbidden:
-        await interaction.followup.send("❌ Bot tidak memiliki izin untuk mengunmute anggota.", ephemeral=True)
+        await interaction.followup.send("❌ Bot tidak memiliki izin untuk mengunmute anggota ini.", ephemeral=True)
     except Exception as e:
-        await interaction.followup.send(f"❌ Terjadi kesalahan saat mengunmute: {e}", ephemeral=True)
+        await interaction.followup.send(f"❌ Terjadi kesalahan: {e}", ephemeral=True)
 
 @tree.command(name="kick", description="Keluarkan anggota dari server.", guild=discord.Object(id=GUILD_ID))
-@app_commands.describe(
-    member="Anggota yang akan dikeluarkan",
-    reason="Alasan pengeluaran"
-)
+@app_commands.describe(member="Anggota yang akan dikeluarkan", reason="Alasan pengeluaran")
 @is_admin_prakom()
 async def kick(interaction: discord.Interaction, member: discord.Member, reason: str = "Tidak ada alasan"):
     await interaction.response.defer(ephemeral=True)
 
-    if member.id == bot.user.id:
-        await interaction.followup.send("❌ Saya tidak bisa mengeluarkan diri sendiri!", ephemeral=True)
-        return
-    if member.id == interaction.user.id:
-        await interaction.followup.send("❌ Kamu tidak bisa mengeluarkan diri sendiri!", ephemeral=True)
-        return
-    if member.top_role >= interaction.user.top_role and interaction.user.id != interaction.guild.owner_id:
-        await interaction.followup.send("❌ Kamu tidak bisa mengeluarkan anggota dengan role yang sama atau lebih tinggi darimu.", ephemeral=True)
+    if member.id == bot.user.id or member.id == interaction.user.id:
+        await interaction.followup.send("❌ Tidak bisa mengeluarkan diri sendiri atau bot.", ephemeral=True)
         return
     if member.top_role >= interaction.guild.me.top_role:
-        await interaction.followup.send("❌ Saya tidak bisa mengeluarkan anggota dengan role yang sama atau lebih tinggi dari saya.", ephemeral=True)
+        await interaction.followup.send("❌ Posisi role anggota setara atau lebih tinggi dari bot.", ephemeral=True)
+        return
+    if member.top_role >= interaction.user.top_role and interaction.user.id != interaction.guild.owner_id:
+        await interaction.followup.send("❌ Posisi role anggota setara atau lebih tinggi dari Anda.", ephemeral=True)
         return
 
     try:
         await member.kick(reason=reason)
-        await interaction.followup.send(f"✅ {member.mention} telah dikeluarkan karena: {reason}", ephemeral=False)
-        log_admin_channel = interaction.guild.get_channel(LOGADMIN_CHANNEL_ID)
-        if log_admin_channel:
-            await log_admin_channel.send(f"👢 **Kick:** {member.mention} dikeluarkan oleh {interaction.user.mention} karena: {reason}.")
-    except discord.Forbidden:
-        await interaction.followup.send("❌ Bot tidak memiliki izin untuk mengeluarkan anggota.", ephemeral=True)
-    except Exception as e:
-        await interaction.followup.send(f"❌ Terjadi kesalahan saat mengeluarkan: {e}", ephemeral=True)
+        embed = discord.Embed(
+            title="👢 Anggota Dikeluarkan (Kick)",
+            description=f"{member.mention} telah dikeluarkan dari server.\nAlasan: **{reason}**",
+            color=CLR_AMBER
+        )
+        await interaction.followup.send(embed=embed, ephemeral=False)
 
-@tree.command(name="ban", description="Ban anggota dari server.", guild=discord.Object(id=GUILD_ID))
-@app_commands.describe(
-    member="Anggota yang akan diban",
-    reason="Alasan ban"
-)
+        log_admin = interaction.guild.get_channel(LOGADMIN_CHANNEL_ID)
+        if log_admin:
+            await log_admin.send(f"👢 **Kick:** {member.mention} dikeluarkan oleh {interaction.user.mention}. Alasan: `{reason}`")
+    except discord.Forbidden:
+        await interaction.followup.send("❌ Bot tidak memiliki izin untuk mengeluarkan anggota ini.", ephemeral=True)
+    except Exception as e:
+        await interaction.followup.send(f"❌ Terjadi kesalahan: {e}", ephemeral=True)
+
+@tree.command(name="ban", description="Blokir permanen (Ban) anggota dari server.", guild=discord.Object(id=GUILD_ID))
+@app_commands.describe(member="Anggota yang akan diban", reason="Alasan pemblokiran")
 @is_admin_prakom()
 async def ban(interaction: discord.Interaction, member: discord.Member, reason: str = "Tidak ada alasan"):
     await interaction.response.defer(ephemeral=True)
 
-    if member.id == bot.user.id:
-        await interaction.followup.send("❌ Saya tidak bisa memban diri sendiri!", ephemeral=True)
-        return
-    if member.id == interaction.user.id:
-        await interaction.followup.send("❌ Kamu tidak bisa memban diri sendiri!", ephemeral=True)
-        return
-    if member.top_role >= interaction.user.top_role and interaction.user.id != interaction.guild.owner_id:
-        await interaction.followup.send("❌ Kamu tidak bisa memban anggota dengan role yang sama atau lebih tinggi darimu.", ephemeral=True)
+    if member.id == bot.user.id or member.id == interaction.user.id:
+        await interaction.followup.send("❌ Tidak bisa memban diri sendiri atau bot.", ephemeral=True)
         return
     if member.top_role >= interaction.guild.me.top_role:
-        await interaction.followup.send("❌ Saya tidak bisa memban anggota dengan role yang sama atau lebih tinggi dari saya.", ephemeral=True)
+        await interaction.followup.send("❌ Posisi role anggota setara atau lebih tinggi dari bot.", ephemeral=True)
+        return
+    if member.top_role >= interaction.user.top_role and interaction.user.id != interaction.guild.owner_id:
+        await interaction.followup.send("❌ Posisi role anggota setara atau lebih tinggi dari Anda.", ephemeral=True)
         return
 
     try:
         await member.ban(reason=reason)
-        await interaction.followup.send(f"✅ {member.mention} telah diban karena: {reason}", ephemeral=False)
-        log_admin_channel = interaction.guild.get_channel(LOGADMIN_CHANNEL_ID)
-        if log_admin_channel:
-            await log_admin_channel.send(f"🔨 **Ban:** {member.mention} diban oleh {interaction.user.mention} karena: {reason}.")
-    except discord.Forbidden:
-        await interaction.followup.send("❌ Bot tidak memiliki izin untuk memban anggota.", ephemeral=True)
-    except Exception as e:
-        await interaction.followup.send(f"❌ Terjadi kesalahan saat memban: {e}", ephemeral=True)
+        embed = discord.Embed(
+            title="🔨 Anggota Diblokir (Ban)",
+            description=f"{member.mention} telah diblokir dari server.\nAlasan: **{reason}**",
+            color=CLR_CRIMSON
+        )
+        await interaction.followup.send(embed=embed, ephemeral=False)
 
-@tree.command(name="unban", description="Unban anggota dari server.", guild=discord.Object(id=GUILD_ID))
-@app_commands.describe(user_id="ID pengguna yang akan diunban")
+        log_admin = interaction.guild.get_channel(LOGADMIN_CHANNEL_ID)
+        if log_admin:
+            await log_admin.send(f"🔨 **Ban:** {member.mention} diban oleh {interaction.user.mention}. Alasan: `{reason}`")
+    except discord.Forbidden:
+        await interaction.followup.send("❌ Bot tidak memiliki izin untuk memban anggota ini.", ephemeral=True)
+    except Exception as e:
+        await interaction.followup.send(f"❌ Terjadi kesalahan: {e}", ephemeral=True)
+
+@tree.command(name="unban", description="Buka blokir (Unban) anggota berdasarkan User ID.", guild=discord.Object(id=GUILD_ID))
+@app_commands.describe(user_id="ID pengguna Discord yang akan diunban")
 @is_admin_prakom()
 async def unban(interaction: discord.Interaction, user_id: str):
     await interaction.response.defer(ephemeral=True)
-
     try:
-        user = discord.Object(id=int(user_id))
-        await interaction.guild.unban(user)
-        await interaction.followup.send(f"✅ Pengguna dengan ID `{user_id}` telah diunban.", ephemeral=False)
-        log_admin_channel = interaction.guild.get_channel(LOGADMIN_CHANNEL_ID)
-        if log_admin_channel:
-            await log_admin_channel.send(f"🔓 **Unban:** Pengguna ID `{user_id}` diunban oleh {interaction.user.mention}.")
+        user_obj = discord.Object(id=int(user_id.strip()))
+        await interaction.guild.unban(user_obj)
+        embed = discord.Embed(
+            description=f"✅ Blokir akun dengan ID `{user_id}` berhasil dicabut.",
+            color=CLR_EMERALD
+        )
+        await interaction.followup.send(embed=embed, ephemeral=False)
+
+        log_admin = interaction.guild.get_channel(LOGADMIN_CHANNEL_ID)
+        if log_admin:
+            await log_admin.send(f"🔓 **Unban:** User ID `{user_id}` diunban oleh {interaction.user.mention}.")
     except discord.NotFound:
-        await interaction.followup.send(f"❗ Pengguna dengan ID `{user_id}` tidak ditemukan dalam daftar ban.", ephemeral=True)
+        await interaction.followup.send(f"❗ Akun dengan ID `{user_id}` tidak ditemukan dalam daftar ban server.", ephemeral=True)
+    except ValueError:
+        await interaction.followup.send("❌ User ID harus berupa rangkaian angka numerik.", ephemeral=True)
     except discord.Forbidden:
         await interaction.followup.send("❌ Bot tidak memiliki izin untuk mengunban anggota.", ephemeral=True)
-    except ValueError:
-        await interaction.followup.send("❌ ID pengguna harus berupa angka.", ephemeral=True)
     except Exception as e:
-        await interaction.followup.send(f"❌ Terjadi kesalahan saat mengunban: {e}", ephemeral=True)
+        await interaction.followup.send(f"❌ Terjadi kesalahan: {e}", ephemeral=True)
 
-@tree.command(name="clear", description="Hapus sejumlah pesan dari channel.", guild=discord.Object(id=GUILD_ID))
-@app_commands.describe(amount="Jumlah pesan yang akan dihapus (maks 100)")
+@tree.command(name="clear", description="Bersihkan sejumlah pesan di channel ini sekaligus.", guild=discord.Object(id=GUILD_ID))
+@app_commands.describe(amount="Jumlah pesan yang akan dihapus (1 - 100)")
 @is_admin_prakom()
 async def clear(interaction: discord.Interaction, amount: int):
     await interaction.response.defer(ephemeral=True)
 
     if amount <= 0 or amount > 100:
-        await interaction.followup.send("❌ Jumlah pesan yang dihapus harus antara 1 dan 100.", ephemeral=True)
+        await interaction.followup.send("❌ Jumlah pesan harus berada di antara 1 dan 100.", ephemeral=True)
         return
 
     try:
         deleted = await interaction.channel.purge(limit=amount)
-        await interaction.followup.send(f"✅ Berhasil menghapus {len(deleted)} pesan.", ephemeral=True)
-        log_admin_channel = interaction.guild.get_channel(LOGADMIN_CHANNEL_ID)
-        if log_admin_channel:
-            await log_admin_channel.send(f"🗑️ **Pesan Dihapus:** {len(deleted)} pesan dihapus di {interaction.channel.mention} oleh {interaction.user.mention}.")
+        embed = discord.Embed(
+            description=f"🗑️ Sebanyak **{len(deleted)} pesan** berhasil dibersihkan dari channel.",
+            color=CLR_EMERALD
+        )
+        await interaction.followup.send(embed=embed, ephemeral=True)
+
+        log_admin = interaction.guild.get_channel(LOGADMIN_CHANNEL_ID)
+        if log_admin:
+            await log_admin.send(f"🗑️ **Pesan Dihapus:** {len(deleted)} pesan di {interaction.channel.mention} dibersihkan oleh {interaction.user.mention}.")
     except discord.Forbidden:
-        await interaction.followup.send("❌ Bot tidak memiliki izin untuk menghapus pesan di channel ini.", ephemeral=True)
+        await interaction.followup.send("❌ Bot tidak memiliki izin `Manage Messages` di channel ini.", ephemeral=True)
     except Exception as e:
         await interaction.followup.send(f"❌ Terjadi kesalahan saat menghapus pesan: {e}", ephemeral=True)
 
 @tree.command(name="add_role", description="Berikan role kepada anggota.", guild=discord.Object(id=GUILD_ID))
-@app_commands.describe(
-    member="Anggota yang akan diberi role",
-    role_name="Nama role yang akan diberikan"
-)
+@app_commands.describe(member="Anggota penerima", role_name="Nama role yang diberikan")
 @is_admin_prakom()
 async def add_role(interaction: discord.Interaction, member: discord.Member, role_name: str):
     await interaction.response.defer(ephemeral=True)
-
     role = discord.utils.get(interaction.guild.roles, name=role_name)
-    if not role:
-        await interaction.followup.send(f"❌ Role `{role_name}` tidak ditemukan.", ephemeral=True)
-        return
 
-    if role in member.roles:
-        await interaction.followup.send(f"❗ {member.mention} sudah memiliki role `{role_name}`.", ephemeral=True)
+    if not role:
+        await interaction.followup.send(f"❌ Role `{role_name}` tidak ditemukan di server.", ephemeral=True)
         return
-    
+    if role in member.roles:
+        await interaction.followup.send(f"ℹ️ {member.mention} sudah memiliki role `{role_name}`.", ephemeral=True)
+        return
     if role >= interaction.guild.me.top_role:
-        await interaction.followup.send("❌ Saya tidak bisa memberikan role yang sama atau lebih tinggi dari role saya.", ephemeral=True)
+        await interaction.followup.send("❌ Role tersebut setara atau lebih tinggi dari posisi role bot.", ephemeral=True)
         return
 
     try:
         await member.add_roles(role)
-        await interaction.followup.send(f"✅ Role `{role_name}` berhasil diberikan kepada {member.mention}.", ephemeral=False)
-        log_admin_channel = interaction.guild.get_channel(LOGADMIN_CHANNEL_ID)
-        if log_admin_channel:
-            await log_admin_channel.send(f"➕ **Role Diberikan:** Role `{role_name}` diberikan kepada {member.mention} oleh {interaction.user.mention}.")
+        embed = discord.Embed(
+            description=f"✅ Role **{role.name}** berhasil disematkan kepada {member.mention}.",
+            color=CLR_EMERALD
+        )
+        await interaction.followup.send(embed=embed, ephemeral=False)
+
+        log_admin = interaction.guild.get_channel(LOGADMIN_CHANNEL_ID)
+        if log_admin:
+            await log_admin.send(f"➕ **Role Diberikan:** Role `{role_name}` diberikan kepada {member.mention} oleh {interaction.user.mention}.")
     except discord.Forbidden:
         await interaction.followup.send("❌ Bot tidak memiliki izin untuk memberikan role ini.", ephemeral=True)
     except Exception as e:
-        await interaction.followup.send(f"❌ Terjadi kesalahan saat memberikan role: {e}", ephemeral=True)
+        await interaction.followup.send(f"❌ Terjadi kesalahan: {e}", ephemeral=True)
 
-@tree.command(name="remove_role", description="Hapus role dari anggota.", guild=discord.Object(id=GUILD_ID))
-@app_commands.describe(
-    member="Anggota yang akan dihapus rolenya",
-    role_name="Nama role yang akan dihapus"
-)
+@tree.command(name="remove_role", description="Cabut role dari anggota.", guild=discord.Object(id=GUILD_ID))
+@app_commands.describe(member="Anggota target", role_name="Nama role yang dicabut")
 @is_admin_prakom()
 async def remove_role(interaction: discord.Interaction, member: discord.Member, role_name: str):
     await interaction.response.defer(ephemeral=True)
-
     role = discord.utils.get(interaction.guild.roles, name=role_name)
+
     if not role:
         await interaction.followup.send(f"❌ Role `{role_name}` tidak ditemukan.", ephemeral=True)
         return
-
     if role not in member.roles:
-        await interaction.followup.send(f"❗ {member.mention} tidak memiliki role `{role_name}`.", ephemeral=True)
+        await interaction.followup.send(f"ℹ️ {member.mention} tidak memiliki role `{role_name}`.", ephemeral=True)
         return
 
     try:
         await member.remove_roles(role)
-        await interaction.followup.send(f"✅ Role `{role_name}` berhasil dihapus dari {member.mention}.", ephemeral=False)
-        log_admin_channel = interaction.guild.get_channel(LOGADMIN_CHANNEL_ID)
-        if log_admin_channel:
-            await log_admin_channel.send(f"➖ **Role Dihapus:** Role `{role_name}` dihapus dari {member.mention} oleh {interaction.user.mention}.")
-    except discord.Forbidden:
-        await interaction.followup.send("❌ Bot tidak memiliki izin untuk menghapus role ini.", ephemeral=True)
-    except Exception as e:
-        await interaction.followup.send(f"❌ Terjadi kesalahan saat menghapus role: {e}", ephemeral=True)
-
-@tree.command(name="create_ticket", description="Buat tiket bantuan.", guild=discord.Object(id=GUILD_ID))
-async def create_ticket(interaction: discord.Interaction):
-    await interaction.response.defer(ephemeral=True)
-    
-    channel, error_message = await create_ticket_channel(interaction.guild, interaction.user)
-    
-    if channel:
         embed = discord.Embed(
-            title="Tiket Bantuan",
-            description=f"Halo {interaction.user.mention}! Tiket Anda telah dibuat.\n\n"
-                        f"Seorang admin atau moderator akan segera membantu Anda.\n"
-                        f"Gunakan tombol di bawah untuk mengelola tiket ini.",
-            color=discord.Color.green()
+            description=f"✅ Role **{role.name}** berhasil dicabut dari {member.mention}.",
+            color=CLR_EMERALD
         )
-        view = TicketButtons(interaction.user, channel.id)
-        await channel.send(embed=embed, view=view)
-        await interaction.followup.send(f"✅ Tiket Anda telah dibuat: {channel.mention}", ephemeral=True)
-        
-        log_admin_channel = interaction.guild.get_channel(LOGADMIN_CHANNEL_ID)
-        if log_admin_channel:
-            await log_admin_channel.send(f"🆕 **Tiket Baru:** Tiket `{channel.name}` dibuat oleh {interaction.user.mention}.")
-    else:
-        await interaction.followup.send(error_message, ephemeral=True)
+        await interaction.followup.send(embed=embed, ephemeral=False)
 
-@tree.command(name="announcement", description="Kirim pengumuman ke channel yang ditentukan.", guild=discord.Object(id=GUILD_ID))
-@app_commands.describe(
-    channel="Channel tempat pengumuman akan dikirim",
-    message="Pesan pengumuman"
-)
+        log_admin = interaction.guild.get_channel(LOGADMIN_CHANNEL_ID)
+        if log_admin:
+            await log_admin.send(f"➖ **Role Dicabut:** Role `{role_name}` dicabut dari {member.mention} oleh {interaction.user.mention}.")
+    except discord.Forbidden:
+        await interaction.followup.send("❌ Bot tidak memiliki izin untuk mencabut role ini.", ephemeral=True)
+    except Exception as e:
+        await interaction.followup.send(f"❌ Terjadi kesalahan: {e}", ephemeral=True)
+
+@tree.command(name="announcement", description="Kirim pengumuman resmi ke channel.", guild=discord.Object(id=GUILD_ID))
+@app_commands.describe(channel="Channel tujuan", message="Isi teks pengumuman")
 @is_admin_prakom()
 async def announcement(interaction: discord.Interaction, channel: discord.TextChannel, message: str):
     await interaction.response.defer(ephemeral=True)
 
     try:
         embed = discord.Embed(
-            title="📢 PENGUMUMAN PENTING 📢",
+            title="📢 PENGUMUMAN RESMI",
             description=message,
-            color=discord.Color.gold(),
+            color=CLR_ADHYAKSA_GOLD,
             timestamp=datetime.now(WIB)
         )
-        embed.set_footer(text=f"Dari: {interaction.user.display_name}")
-        
+        embed.set_footer(text=f"Diumumkan oleh: {interaction.user.display_name} • Kejaksaan RI")
         await channel.send(embed=embed)
-        await interaction.followup.send(f"✅ Pengumuman berhasil dikirim ke {channel.mention}.", ephemeral=True)
-        log_admin_channel = interaction.guild.get_channel(LOGADMIN_CHANNEL_ID)
-        if log_admin_channel:
-            await log_admin_channel.send(f"📣 **Pengumuman Dikirim:** Pengumuman oleh {interaction.user.mention} dikirim ke {channel.mention}.")
-    except discord.Forbidden:
-        await interaction.followup.send("❌ Bot tidak memiliki izin untuk mengirim pesan di channel tersebut.", ephemeral=True)
-    except Exception as e:
-        await interaction.followup.send(f"❌ Terjadi kesalahan saat mengirim pengumuman: {e}", ephemeral=True)
 
-@tree.command(name="scheduled_announcement", description="Jadwalkan pengumuman ke channel yang ditentukan.", guild=discord.Object(id=GUILD_ID))
+        await interaction.followup.send(f"✅ Pengumuman berhasil dipublikasikan di {channel.mention}.", ephemeral=True)
+        log_admin = interaction.guild.get_channel(LOGADMIN_CHANNEL_ID)
+        if log_admin:
+            await log_admin.send(f"📣 **Pengumuman:** Diumumkan ke {channel.mention} oleh {interaction.user.mention}.")
+    except discord.Forbidden:
+        await interaction.followup.send("❌ Bot tidak memiliki izin mengirim pesan di channel tersebut.", ephemeral=True)
+    except Exception as e:
+        await interaction.followup.send(f"❌ Terjadi kesalahan: {e}", ephemeral=True)
+
+@tree.command(name="scheduled_announcement", description="Jadwalkan pengumuman resmi ke channel tertentu.", guild=discord.Object(id=GUILD_ID))
 @app_commands.describe(
-    channel="Channel tempat pengumuman akan dikirim",
-    waktu="Waktu pengiriman pengumuman (YYYY-MM-DDTHH:MM)",
-    message="Pesan pengumuman"
+    channel="Channel tujuan",
+    waktu="Format: YYYY-MM-DDTHH:MM (contoh: 2026-05-20T08:00)",
+    message="Isi teks pengumuman"
 )
 @is_admin_prakom()
 async def scheduled_announcement(interaction: discord.Interaction, channel: discord.TextChannel, waktu: str, message: str):
@@ -1220,14 +2199,16 @@ async def scheduled_announcement(interaction: discord.Interaction, channel: disc
     now = datetime.now(WIB)
 
     try:
-        dt = datetime.fromisoformat(waktu)
+        dt = datetime.fromisoformat(waktu.replace(" ", "T"))
         dt = dt.replace(tzinfo=WIB)
 
         if dt < now:
-            await interaction.followup.send("Waktu pengumuman terjadwal harus di masa depan.", ephemeral=True)
+            await interaction.followup.send("❌ Waktu pengumuman terjadwal harus berada di masa depan.", ephemeral=True)
             return
 
+        rem_id = str(uuid.uuid4())[:6]
         role_reminders.append({
+            "id": rem_id,
             "tipe": "scheduled_announcement",
             "waktu": dt,
             "pesan": message,
@@ -1236,24 +2217,53 @@ async def scheduled_announcement(interaction: discord.Interaction, channel: disc
         })
         save_role_reminders()
 
-        await interaction.followup.send(f"✅ Pengumuman akan dikirim ke {channel.mention} pada **{dt.strftime('%d %b %Y %H:%M WIB')}**.", ephemeral=True)
-        log_admin_channel = interaction.guild.get_channel(LOGADMIN_CHANNEL_ID)
-        if log_admin_channel:
-            await log_admin_channel.send(f"🗓️ **Pengumuman Dijadwalkan:** Pengumuman oleh {interaction.user.mention} dijadwalkan ke {channel.mention} pada {dt.strftime('%d %b %Y %H:%M WIB')}.")
-    except ValueError:
-        await interaction.followup.send("❌ Format waktu harus YYYY-MM-DDTHH:MM (contoh: 2025-05-26T14:30).", ephemeral=True)
-    except Exception as e:
-        await interaction.followup.send(f"❌ Terjadi kesalahan saat menjadwalkan pengumuman: {e}", ephemeral=True)
+        embed = discord.Embed(
+            title="🗓️ Pengumuman Berhasil Dijadwalkan",
+            description=(
+                f"Pengumuman resmi akan dikirim otomatis:\n\n"
+                f"📅 **Waktu:** {dt.strftime('%d %b %Y, %H:%M WIB')}\n"
+                f"📍 **Channel:** {channel.mention}\n"
+                f"📝 **Isi:** {message}\n"
+                f"🏷️ **ID:** `{rem_id}`"
+            ),
+            color=CLR_ADHYAKSA_GOLD
+        )
+        await interaction.followup.send(embed=embed, ephemeral=True)
 
-## Jalankan Bot
+        log_admin = interaction.guild.get_channel(LOGADMIN_CHANNEL_ID)
+        if log_admin:
+            await log_admin.send(f"🗓️ **Pengumuman Dijadwalkan:** Dijadwalkan ke {channel.mention} pada {dt.strftime('%d %b %Y %H:%M WIB')} oleh {interaction.user.mention}.")
+    except ValueError:
+        await interaction.followup.send("❌ Format waktu harus `YYYY-MM-DDTHH:MM` (contoh: 2026-05-20T08:00).", ephemeral=True)
+    except Exception as e:
+        await interaction.followup.send(f"❌ Terjadi kesalahan: {e}", ephemeral=True)
+
+# ======= GLOBAL ERROR HANDLER =======
+@tree.error
+async def on_app_command_error(interaction: discord.Interaction, error: app_commands.AppCommandError):
+    if isinstance(error, app_commands.CheckFailure):
+        return
+    print(f"Unhandled app command error: {error}")
+    err_embed = discord.Embed(
+        title="❌ Terjadi Kesalahan",
+        description=f"Gagal mengeksekusi perintah:\n`{error}`",
+        color=CLR_CRIMSON
+    )
+    try:
+        if interaction.response.is_done():
+            await interaction.followup.send(embed=err_embed, ephemeral=True)
+        else:
+            await interaction.response.send_message(embed=err_embed, ephemeral=True)
+    except Exception:
+        pass
+
+# ======= JALANKAN BOT =======
 if __name__ == "__main__":
-    # Mengambil token dari variabel lingkungan bernama DISCORD_TOKEN
     TOKEN = os.getenv("DISCORD_TOKEN")
 
     if not TOKEN:
         print("❌ ERROR: Variabel lingkungan 'DISCORD_TOKEN' tidak ditemukan.")
-        print("Pastikan Anda telah mengatur variabel lingkungan DISCORD_TOKEN di file .env atau sistem Anda.")
-        # Keluar dari program jika token tidak ditemukan
+        print("Pastikan Anda telah mengatur DISCORD_TOKEN di file .env atau environment server.")
         exit(1)
     else:
         try:

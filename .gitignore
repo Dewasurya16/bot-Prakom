@@ -1,0 +1,22 @@
+# Environment variables (JANGAN DI-PUSH: mengandung token Discord)
+.env
+
+# Python cache & virtual environment
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+.venv/
+env/
+
+# Backup & temporary files
+*.bak
+*.tmp
+
+# Dynamic Bot Data Files (opsional agar data server tidak tertimpa saat pull)
+# warn_data.json
+# ticket_data.json
+# private_reminders.json
+# role_reminders.json
+# public_reminders.json
+# level_data.json
